@@ -1,4 +1,6 @@
 import Link from "next/link";
+import HypeScore from "@/components/HypeScore/HypeScore";
+import { getHypeScore } from "@/lib/hypeScoreCalculator";
 
 interface CoinData {
   id: string;
@@ -318,6 +320,7 @@ export default async function CoinPage({
   const risk = calculateRisk(coin);
   const verdict = getVerdict(coin, risk);
   const zones = getPriceZones(price);
+  const hype = getHypeScore({ priceChange24h: change24h, volumeRatio });
 
   const rc = riskColors(risk.level);
   const vc = verdictColors(verdict.action);
@@ -381,8 +384,8 @@ export default async function CoinPage({
           </div>
         </div>
 
-        {/* ── Risk + Verdict side by side ── */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* ── Risk + Verdict + Hype Score ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {/* Risk Card */}
           <div
             style={{ background: rc.bg, border: `1px solid ${rc.border}` }}
@@ -439,6 +442,9 @@ export default async function CoinPage({
             </div>
             <p className="text-sm" style={{ color: "#94a3b8" }}>{verdict.reason}</p>
           </div>
+
+          {/* Hype Score Card */}
+          <HypeScore result={hype} priceChange24h={change24h} volumeRatio={volumeRatio} />
         </div>
 
         {/* ── Price Zones ── */}

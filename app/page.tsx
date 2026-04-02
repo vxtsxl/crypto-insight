@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getHypeScore } from "@/lib/hypeScoreCalculator";
 
 interface TrendingCoin {
   item: {
@@ -11,6 +12,8 @@ interface TrendingCoin {
         usd?: number;
       };
       price?: string;
+      market_cap?: string;
+      total_volume?: string;
     };
   };
 }
@@ -27,6 +30,20 @@ async function getTrendingCoins(): Promise<TrendingCoin[]> {
   } catch {
     return [];
   }
+}
+
+/** Parse CoinGecko's formatted currency strings like "$1.23B", "$456.78M" into a number. */
+function parseCurrencyString(value: string | undefined): number {
+  if (!value) return 0;
+  const clean = value.replace(/[$,\s]/g, "");
+  const suffix = clean.slice(-1).toUpperCase();
+  const num = parseFloat(clean);
+  if (isNaN(num)) return 0;
+  if (suffix === "T") return num * 1e12;
+  if (suffix === "B") return num * 1e9;
+  if (suffix === "M") return num * 1e6;
+  if (suffix === "K") return num * 1e3;
+  return num;
 }
 
 export default async function Home() {
@@ -99,6 +116,13 @@ export default async function Home() {
           >
             Analyse Ethereum
           </Link>
+          <Link
+            href="/portfolio"
+            style={{ background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.4)", color: "#4ade80" }}
+            className="px-6 py-3 rounded-xl font-semibold hover:opacity-80 transition-opacity"
+          >
+            💼 Portfolio Tool
+          </Link>
         </div>
       </section>
 
@@ -153,6 +177,15 @@ export default async function Home() {
                   ? `${isPositive ? "+" : ""}${change.toFixed(2)}%`
                   : "—";
 
+              const marketCap = parseCurrencyString(item.data?.market_cap);
+              const totalVolume = parseCurrencyString(item.data?.total_volume);
+              const volumeRatio = marketCap > 0 ? (totalVolume / marketCap) * 100 : 0;
+
+              const hype =
+                typeof change === "number"
+                  ? getHypeScore({ priceChange24h: change, volumeRatio })
+                  : null;
+
               return (
                 <Link
                   key={item.id}
@@ -183,13 +216,111 @@ export default async function Home() {
                     >
                       {changeStr}
                     </p>
-                    <p className="text-xs" style={{ color: "#64748b" }}>24h</p>
+                    {hype && (
+                      <p className="text-xs mt-0.5" style={{ color: "#64748b" }}>
+                        {hype.emoji} {hype.category}
+                      </p>
+                    )}
                   </div>
                 </Link>
               );
             })}
           </div>
         )}
+      </section>
+
+      {/* ── Top Opportunities Today ── */}
+      {trending.length > 0 && (() => {
+        const opportunities = trending
+          .map(({ item }) => {
+            const change = item.data?.price_change_percentage_24h?.usd ?? 0;
+            const marketCap = parseCurrencyString(item.data?.market_cap);
+            const totalVolume = parseCurrencyString(item.data?.total_volume);
+            const volumeRatio = marketCap > 0 ? (totalVolume / marketCap) * 100 : 0;
+            const hype = getHypeScore({ priceChange24h: change, volumeRatio });
+            return { item, change, hype };
+          })
+          .filter(({ hype }) => hype.category === "High")
+          .slice(0, 3);
+
+        if (opportunities.length === 0) return null;
+
+        return (
+          <section className="max-w-6xl mx-auto px-4 py-8">
+            <div className="flex items-center gap-2 mb-6">
+              <span className="text-xl">🚀</span>
+              <h2 className="text-2xl font-bold" style={{ color: "var(--foreground)" }}>
+                Top Opportunities Today
+              </h2>
+              <span
+                style={{ background: "rgba(251,113,32,0.15)", color: "#fb7120", border: "1px solid rgba(251,113,32,0.3)" }}
+                className="text-xs px-2 py-0.5 rounded-full ml-auto"
+              >
+                🔥 High Hype
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {opportunities.map(({ item, change, hype }) => {
+                const isPositive = change >= 0;
+                return (
+                  <Link
+                    key={item.id}
+                    href={`/coin/${item.id}`}
+                    style={{
+                      background: "rgba(251,113,32,0.05)",
+                      border: "1px solid rgba(251,113,32,0.3)",
+                    }}
+                    className="card-hover rounded-2xl p-4 flex items-center gap-4 no-underline"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={item.thumb} alt={item.name} width={40} height={40} className="rounded-full" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold truncate" style={{ color: "var(--foreground)" }}>
+                        {item.name}
+                      </p>
+                      <p className="text-xs" style={{ color: "#64748b" }}>
+                        {hype.emoji} {hype.category} Hype
+                      </p>
+                    </div>
+                    <p
+                      className="text-sm font-bold"
+                      style={{ color: isPositive ? "#4ade80" : "#f87171" }}
+                    >
+                      {isPositive ? "+" : ""}
+                      {change.toFixed(2)}%
+                    </p>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })()}
+
+      {/* ── Portfolio Tool CTA ── */}
+      <section className="max-w-6xl mx-auto px-4 py-6">
+        <div
+          style={{ background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.25)" }}
+          className="rounded-2xl p-6 flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left"
+        >
+          <div className="text-4xl">💼</div>
+          <div className="flex-1">
+            <h3 className="font-bold text-lg mb-1" style={{ color: "var(--foreground)" }}>
+              New: Portfolio Suggestion Tool
+            </h3>
+            <p className="text-sm" style={{ color: "#94a3b8" }}>
+              Enter your budget and get a beginner-safe allocation across Bitcoin, Ethereum, growth
+              coins, and meme coins — with a CSV export.
+            </p>
+          </div>
+          <Link
+            href="/portfolio"
+            style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}
+            className="px-6 py-3 rounded-xl font-semibold text-white hover:opacity-90 transition-opacity whitespace-nowrap"
+          >
+            Try It Free →
+          </Link>
+        </div>
       </section>
 
       {/* ── How It Works ── */}
