@@ -148,8 +148,8 @@ function getVerdict(coin: CoinData, risk: RiskScore): Verdict {
     };
   }
 
-  // 3. Quality dip (established large-cap or mega-cap with >15% drop)
-  if (change24h < -15 && marketCap > 1_000_000_000) {
+  // 3. Quality dip (established coin >$100M cap with >15% drop)
+  if (change24h < -15 && marketCap > 100_000_000) {
     return {
       action: "BUY",
       label: "Buy the Dip",
@@ -159,29 +159,40 @@ function getVerdict(coin: CoinData, risk: RiskScore): Verdict {
     };
   }
 
-  // 4. Falling knife (small/mid-cap dropping)
-  if (change24h < -15 && marketCap <= 1_000_000_000) {
+  // 4. Falling knife (small-cap dropping)
+  if (change24h < -15 && marketCap <= 100_000_000) {
     return {
-      action: "AVOID",
+      action: "WAIT",
       label: "Falling Knife",
       emoji: "🔪",
-      reason: "Small/mid-cap in sharp decline. Catching falling knives is dangerous.",
+      reason: "Small-cap in sharp decline. Wait for stabilisation before entering.",
       confidence: "Medium",
     };
   }
 
-  // 5. Healthy growth
-  if (change24h > 5 && change24h <= 20 && risk.level !== "High") {
+  // 5. Healthy growth (5–15% gain with decent volume ratio)
+  if (change24h > 5 && change24h <= 15 && volumeRatio > 10) {
     return {
-      action: "NEUTRAL",
+      action: "BUY",
       label: "Healthy Growth",
       emoji: "✅",
-      reason: "Moderate positive movement without excessive hype.",
+      reason: "Moderate positive movement with solid volume — healthy uptrend signal.",
       confidence: "Medium",
     };
   }
 
-  // 6. High risk — wait
+  // 6. Stable movement (−5% to +5%) → neutral
+  if (change24h >= -5 && change24h <= 5) {
+    return {
+      action: "NEUTRAL",
+      label: "Stable",
+      emoji: "😐",
+      reason: "Price is moving sideways. No strong directional signal at this time.",
+      confidence: "Low",
+    };
+  }
+
+  // 7. High risk — wait
   if (risk.level === "High") {
     return {
       action: "WAIT",
@@ -192,12 +203,12 @@ function getVerdict(coin: CoinData, risk: RiskScore): Verdict {
     };
   }
 
-  // 7. Default neutral
+  // 8. Default — wait
   return {
-    action: "NEUTRAL",
-    label: "Neutral",
-    emoji: "😐",
-    reason: "No strong signal detected. Monitor for clearer entry point.",
+    action: "WAIT",
+    label: "Wait",
+    emoji: "⏳",
+    reason: "No strong signal detected. Monitor for a clearer entry point.",
     confidence: "Low",
   };
 }

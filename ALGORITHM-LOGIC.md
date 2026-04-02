@@ -64,23 +64,27 @@ Verdicts are evaluated in priority order (first match wins):
    Strong pump with elevated volume — wait for consolidation (High confidence).
 
 3. **Quality Dip → Buy**  
-   24h change < −15% AND market cap > $1B.  
+   24h change < −15% AND market cap > $100M.  
    Established project in significant dip — potential accumulation (Medium confidence).
 
-4. **Falling Knife → Avoid**  
-   24h change < −15% AND market cap ≤ $1B.  
-   Small/mid-cap in sharp decline — too dangerous (Medium confidence).
+4. **Falling Knife → Wait**  
+   24h change < −15% AND market cap ≤ $100M.  
+   Small-cap in sharp decline — wait for stabilisation (Medium confidence).
 
-5. **Healthy Growth → Neutral (positive)**  
-   5% < 24h change ≤ 20% AND risk level is not High.  
-   Moderate positive movement without excessive hype (Medium confidence).
+5. **Healthy Growth → Buy**  
+   5% < 24h change ≤ 15% AND volume ratio > 10%.  
+   Moderate positive movement with solid volume — healthy uptrend (Medium confidence).
 
-6. **High Risk → Wait**  
+6. **Stable Movement → Neutral**  
+   −5% ≤ 24h change ≤ +5%.  
+   Price moving sideways — no strong directional signal (Low confidence).
+
+7. **High Risk → Wait**  
    If risk level is High and no other rule matched.  
    More research and patience advised (Low confidence).
 
-7. **Default → Neutral**  
-   No strong signal — monitor for clearer entry (Low confidence).
+8. **Default → Wait**  
+   No strong signal — monitor for a clearer entry point (Low confidence).
 
 ---
 
