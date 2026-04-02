@@ -1,51 +1,552 @@
-async function getCoinData(id: string) {
+import Link from "next/link";
+
+interface CoinData {
+  id: string;
+  name: string;
+  symbol: string;
+  image: { large: string };
+  categories: string[];
+  market_data: {
+    current_price: { usd: number };
+    market_cap: { usd: number };
+    total_volume: { usd: number };
+    price_change_percentage_24h: number;
+    price_change_percentage_7d: number;
+    ath: { usd: number };
+    ath_change_percentage: { usd: number };
+    circulating_supply: number;
+    total_supply: number | null;
+  };
+  description: { en: string };
+}
+
+// ─── Risk Score ────────────────────────────────────────────────────────────
+type RiskLevel = "Low" | "Medium" | "High" | "Extreme";
+
+interface RiskScore {
+  level: RiskLevel;
+  score: number; // 0-100
+  factors: string[];
+}
+
+function calculateRisk(coin: CoinData): RiskScore {
+  const factors: string[] = [];
+  let score = 0;
+
+  const { market_cap, total_volume, price_change_percentage_24h } =
+    coin.market_data;
+  const marketCap = market_cap.usd;
+  const volume = total_volume.usd;
+  const change24h = price_change_percentage_24h;
+
+  // Market cap risk (0-40 pts)
+  if (marketCap < 10_000_000) {
+    score += 40;
+    factors.push("Micro-cap (<$10M)");
+  } else if (marketCap < 100_000_000) {
+    score += 30;
+    factors.push("Small-cap (<$100M)");
+  } else if (marketCap < 1_000_000_000) {
+    score += 20;
+    factors.push("Mid-cap (<$1B)");
+  } else if (marketCap < 10_000_000_000) {
+    score += 10;
+    factors.push("Large-cap (<$10B)");
+  } else {
+    score += 0;
+    factors.push("Mega-cap (>$10B)");
+  }
+
+  // Volatility risk (0-30 pts)
+  const absChange = Math.abs(change24h);
+  if (absChange > 30) {
+    score += 30;
+    factors.push("Extreme volatility (>30% 24h)");
+  } else if (absChange > 20) {
+    score += 22;
+    factors.push("High volatility (>20% 24h)");
+  } else if (absChange > 10) {
+    score += 15;
+    factors.push("Moderate volatility (>10% 24h)");
+  } else {
+    score += 5;
+    factors.push("Low volatility (<10% 24h)");
+  }
+
+  // Volume/market-cap ratio risk (0-20 pts)
+  const volumeRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
+  if (volumeRatio > 50) {
+    score += 20;
+    factors.push("Very high volume ratio (>50%)");
+  } else if (volumeRatio > 30) {
+    score += 12;
+    factors.push("High volume ratio (>30%)");
+  } else {
+    score += 4;
+    factors.push("Normal volume ratio");
+  }
+
+  // Meme coin detection (0-10 pts)
+  const isMeme = coin.categories.some((c) =>
+    c.toLowerCase().includes("meme")
+  );
+  if (isMeme) {
+    score += 10;
+    factors.push("Meme coin category");
+  }
+
+  // Clamp 0-100
+  score = Math.min(100, Math.max(0, score));
+
+  let level: RiskLevel;
+  if (score >= 70) level = "Extreme";
+  else if (score >= 45) level = "High";
+  else if (score >= 25) level = "Medium";
+  else level = "Low";
+
+  return { level, score, factors };
+}
+
+// ─── Verdict ──────────────────────────────────────────────────────────────
+type VerdictAction = "BUY" | "WAIT" | "AVOID" | "NEUTRAL";
+type Confidence = "High" | "Medium" | "Low";
+
+interface Verdict {
+  action: VerdictAction;
+  label: string;
+  emoji: string;
+  reason: string;
+  confidence: Confidence;
+}
+
+function getVerdict(coin: CoinData, risk: RiskScore): Verdict {
+  const { price_change_percentage_24h: change24h, market_cap, total_volume } =
+    coin.market_data;
+  const marketCap = market_cap.usd;
+  const volumeRatio =
+    marketCap > 0 ? (total_volume.usd / marketCap) * 100 : 0;
+
+  // 1. Extreme risk → always Avoid
+  if (risk.level === "Extreme") {
+    return {
+      action: "AVOID",
+      label: "Avoid",
+      emoji: "🚫",
+      reason: "Extreme risk detected. Too dangerous for most investors.",
+      confidence: "High",
+    };
+  }
+
+  // 2. Hype detection (big pump + big volume)
+  if (change24h > 20 && volumeRatio > 30) {
+    return {
+      action: "WAIT",
+      label: "Wait",
+      emoji: "⚠️",
+      reason: "Hype detected — strong pump with elevated volume. Wait for consolidation.",
+      confidence: "High",
+    };
+  }
+
+  // 3. Quality dip (established large-cap or mega-cap with >15% drop)
+  if (change24h < -15 && marketCap > 1_000_000_000) {
+    return {
+      action: "BUY",
+      label: "Buy the Dip",
+      emoji: "📉",
+      reason: "Established project in significant dip. Potential accumulation opportunity.",
+      confidence: "Medium",
+    };
+  }
+
+  // 4. Falling knife (small/mid-cap dropping)
+  if (change24h < -15 && marketCap <= 1_000_000_000) {
+    return {
+      action: "AVOID",
+      label: "Falling Knife",
+      emoji: "🔪",
+      reason: "Small/mid-cap in sharp decline. Catching falling knives is dangerous.",
+      confidence: "Medium",
+    };
+  }
+
+  // 5. Healthy growth
+  if (change24h > 5 && change24h <= 20 && risk.level !== "High") {
+    return {
+      action: "NEUTRAL",
+      label: "Healthy Growth",
+      emoji: "✅",
+      reason: "Moderate positive movement without excessive hype.",
+      confidence: "Medium",
+    };
+  }
+
+  // 6. High risk — wait
+  if (risk.level === "High") {
+    return {
+      action: "WAIT",
+      label: "Wait",
+      emoji: "⏳",
+      reason: "High risk profile. More research and patience advised.",
+      confidence: "Low",
+    };
+  }
+
+  // 7. Default neutral
+  return {
+    action: "NEUTRAL",
+    label: "Neutral",
+    emoji: "😐",
+    reason: "No strong signal detected. Monitor for clearer entry point.",
+    confidence: "Low",
+  };
+}
+
+// ─── Price Zones ──────────────────────────────────────────────────────────
+interface PriceZones {
+  buyBelow: number;
+  current: number;
+  avoidAbove: number;
+}
+
+function getPriceZones(price: number): PriceZones {
+  return {
+    buyBelow: price * 0.9,
+    current: price,
+    avoidAbove: price * 1.15,
+  };
+}
+
+// ─── Data Fetching ─────────────────────────────────────────────────────────
+async function getCoinData(id: string): Promise<CoinData | null> {
   try {
     const res = await fetch(
-      `https://api.coingecko.com/api/v3/coins/${id}`,
-      { cache: "no-store" }
+      `https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&community_data=false&developer_data=false`,
+      { next: { revalidate: 60 } }
     );
-
+    if (!res.ok) return null;
     return res.json();
-  } catch (err) {
-    console.log("Fetch error:", err);
+  } catch {
     return null;
   }
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────
+function fmt(n: number): string {
+  if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(2)}K`;
+  return `$${n.toFixed(2)}`;
+}
+
+function fmtPrice(n: number): string {
+  if (n >= 1) return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `$${n.toFixed(6)}`;
+}
+
+function riskColors(level: RiskLevel) {
+  switch (level) {
+    case "Low": return { bg: "rgba(74,222,128,0.1)", border: "rgba(74,222,128,0.4)", text: "#4ade80" };
+    case "Medium": return { bg: "rgba(251,191,36,0.1)", border: "rgba(251,191,36,0.4)", text: "#fbbf24" };
+    case "High": return { bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.4)", text: "#f87171" };
+    case "Extreme": return { bg: "rgba(220,38,38,0.1)", border: "rgba(220,38,38,0.4)", text: "#ef4444" };
+  }
+}
+
+function verdictColors(action: VerdictAction) {
+  switch (action) {
+    case "BUY": return { bg: "rgba(74,222,128,0.1)", border: "rgba(74,222,128,0.4)", text: "#4ade80" };
+    case "WAIT": return { bg: "rgba(251,191,36,0.1)", border: "rgba(251,191,36,0.4)", text: "#fbbf24" };
+    case "AVOID": return { bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.4)", text: "#f87171" };
+    case "NEUTRAL": return { bg: "rgba(148,163,184,0.1)", border: "rgba(148,163,184,0.4)", text: "#94a3b8" };
+  }
+}
+
+// ─── Page Component ────────────────────────────────────────────────────────
 export default async function CoinPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-
   const coin = await getCoinData(id);
-  const price = coin?.market_data?.current_price?.usd;
-  const change24h = coin?.market_data?.price_change_percentage_24h;
 
-  // 🔥 ADD LOGIC HERE (IMPORTANT)
-  let verdict = "Neutral";
-
-if (change24h !== undefined) {
-  if (change24h > 15) {
-    verdict = "Wait (Too much hype 🚀)";
-  } else if (change24h < -10) {
-    verdict = "Buy (Dip 📉)";
-  } else {
-    verdict = "Neutral";
+  // ── Error State ──
+  if (!coin) {
+    return (
+      <main
+        style={{ background: "var(--background)", color: "var(--foreground)" }}
+        className="min-h-screen flex flex-col items-center justify-center px-4 text-center"
+      >
+        <div className="text-6xl mb-4">🔍</div>
+        <h1 className="text-3xl font-bold mb-3" style={{ color: "var(--foreground)" }}>
+          Coin Not Found
+        </h1>
+        <p style={{ color: "#94a3b8" }} className="mb-6 max-w-md">
+          We couldn&apos;t find &ldquo;{id}&rdquo; on CoinGecko. Check the spelling or try a different coin ID.
+        </p>
+        <Link
+          href="/"
+          style={{ background: "linear-gradient(135deg, #7c3aed, #2563eb)" }}
+          className="px-6 py-3 rounded-xl text-white font-semibold hover:opacity-90 transition-opacity"
+        >
+          ← Back to Home
+        </Link>
+      </main>
+    );
   }
-}
+
+  const price = coin.market_data.current_price.usd;
+  const change24h = coin.market_data.price_change_percentage_24h;
+  const change7d = coin.market_data.price_change_percentage_7d;
+  const marketCap = coin.market_data.market_cap.usd;
+  const volume = coin.market_data.total_volume.usd;
+  const athChange = coin.market_data.ath_change_percentage.usd;
+  const volumeRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
+
+  const risk = calculateRisk(coin);
+  const verdict = getVerdict(coin, risk);
+  const zones = getPriceZones(price);
+
+  const rc = riskColors(risk.level);
+  const vc = verdictColors(verdict.action);
 
   return (
-    <div style={{ padding: "20px" }}>
-      <h1>{id.toUpperCase()}</h1>
+    <main
+      style={{ background: "var(--background)", color: "var(--foreground)" }}
+      className="min-h-screen"
+    >
+      {/* ── Header ── */}
+      <header
+        style={{
+          borderBottom: "1px solid var(--card-border)",
+          background: "rgba(26,26,46,0.9)",
+        }}
+        className="sticky top-0 z-50 backdrop-blur-sm"
+      >
+        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-4">
+          <Link href="/" style={{ color: "#94a3b8" }} className="hover:opacity-80 text-sm">
+            ← Home
+          </Link>
+          <span style={{ color: "#2d2d4a" }}>|</span>
+          <span className="text-sm font-medium" style={{ color: "var(--foreground)" }}>
+            {coin.name} ({coin.symbol.toUpperCase()}) Analysis
+          </span>
+        </div>
+      </header>
 
-      
+      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        {/* ── Coin Header ── */}
+        <div
+          style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}
+          className="rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={coin.image.large}
+            alt={coin.name}
+            width={64}
+            height={64}
+            className="rounded-full"
+          />
+          <div className="flex-1">
+            <h1 className="text-3xl font-bold" style={{ color: "var(--foreground)" }}>
+              {coin.name}
+            </h1>
+            <p className="text-sm uppercase mt-0.5" style={{ color: "#64748b" }}>
+              {coin.symbol}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-3xl font-bold" style={{ color: "var(--foreground)" }}>
+              {fmtPrice(price)}
+            </p>
+            <p
+              className="text-sm font-semibold mt-0.5"
+              style={{ color: change24h >= 0 ? "#4ade80" : "#f87171" }}
+            >
+              {change24h >= 0 ? "+" : ""}{change24h?.toFixed(2)}% (24h)
+            </p>
+          </div>
+        </div>
 
-      {/* 🔥 SHOW RESULT HERE */}
-      <p>💰 Price: ${price}</p>
-      <p>📉 24h Change: {change24h}%</p>
-      <p>📊 Verdict: {verdict}</p>
-    </div>
+        {/* ── Risk + Verdict side by side ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Risk Card */}
+          <div
+            style={{ background: rc.bg, border: `1px solid ${rc.border}` }}
+            className="rounded-2xl p-5"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-medium" style={{ color: "#94a3b8" }}>Risk Level</p>
+              <span
+                className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                style={{ background: rc.bg, color: rc.text, border: `1px solid ${rc.border}` }}
+              >
+                {risk.level}
+              </span>
+            </div>
+            {/* Progress bar */}
+            <div className="w-full h-2 rounded-full mb-3" style={{ background: "rgba(255,255,255,0.1)" }}>
+              <div
+                className="h-2 rounded-full"
+                style={{ width: `${risk.score}%`, background: rc.text }}
+              />
+            </div>
+            <p className="text-2xl font-bold mb-3" style={{ color: rc.text }}>
+              {risk.score}/100
+            </p>
+            <ul className="space-y-1">
+              {risk.factors.map((f) => (
+                <li key={f} className="text-xs flex items-center gap-2" style={{ color: "#94a3b8" }}>
+                  <span style={{ color: rc.text }}>•</span> {f}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Verdict Card */}
+          <div
+            style={{ background: vc.bg, border: `1px solid ${vc.border}` }}
+            className="rounded-2xl p-5"
+          >
+            <p className="text-sm font-medium mb-3" style={{ color: "#94a3b8" }}>Smart Verdict</p>
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-4xl">{verdict.emoji}</span>
+              <div>
+                <p className="text-2xl font-bold" style={{ color: vc.text }}>
+                  {verdict.label}
+                </p>
+                <p
+                  className="text-xs"
+                  style={{ color: "#64748b" }}
+                >
+                  Confidence:{" "}
+                  <span style={{ color: vc.text }}>{verdict.confidence}</span>
+                </p>
+              </div>
+            </div>
+            <p className="text-sm" style={{ color: "#94a3b8" }}>{verdict.reason}</p>
+          </div>
+        </div>
+
+        {/* ── Price Zones ── */}
+        <div
+          style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}
+          className="rounded-2xl p-5"
+        >
+          <h2 className="font-semibold mb-4" style={{ color: "var(--foreground)" }}>
+            💰 Price Zones
+          </h2>
+          <div className="grid grid-cols-3 gap-3">
+            <div
+              style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)" }}
+              className="rounded-xl p-4 text-center"
+            >
+              <p className="text-xs mb-1" style={{ color: "#94a3b8" }}>Buy Below</p>
+              <p className="font-bold" style={{ color: "#4ade80" }}>{fmtPrice(zones.buyBelow)}</p>
+              <p className="text-xs mt-1" style={{ color: "#64748b" }}>−10%</p>
+            </div>
+            <div
+              style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.3)" }}
+              className="rounded-xl p-4 text-center"
+            >
+              <p className="text-xs mb-1" style={{ color: "#94a3b8" }}>Current</p>
+              <p className="font-bold" style={{ color: "#818cf8" }}>{fmtPrice(zones.current)}</p>
+              <p className="text-xs mt-1" style={{ color: "#64748b" }}>Live</p>
+            </div>
+            <div
+              style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)" }}
+              className="rounded-xl p-4 text-center"
+            >
+              <p className="text-xs mb-1" style={{ color: "#94a3b8" }}>Avoid Above</p>
+              <p className="font-bold" style={{ color: "#f87171" }}>{fmtPrice(zones.avoidAbove)}</p>
+              <p className="text-xs mt-1" style={{ color: "#64748b" }}>+15%</p>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Market Stats ── */}
+        <div
+          style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}
+          className="rounded-2xl p-5"
+        >
+          <h2 className="font-semibold mb-4" style={{ color: "var(--foreground)" }}>
+            📊 Market Statistics
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            {[
+              { label: "Market Cap", value: fmt(marketCap) },
+              { label: "24h Volume", value: fmt(volume) },
+              { label: "Volume Ratio", value: `${volumeRatio.toFixed(1)}%` },
+              {
+                label: "7d Change",
+                value: `${change7d >= 0 ? "+" : ""}${change7d?.toFixed(2)}%`,
+                color: change7d >= 0 ? "#4ade80" : "#f87171",
+              },
+              {
+                label: "From ATH",
+                value: `${athChange?.toFixed(1)}%`,
+                color: athChange >= 0 ? "#4ade80" : "#f87171",
+              },
+              {
+                label: "Categories",
+                value: coin.categories.slice(0, 2).join(", ") || "—",
+                small: true,
+              },
+            ].map((stat) => (
+              <div key={stat.label}>
+                <p className="text-xs mb-1" style={{ color: "#64748b" }}>{stat.label}</p>
+                <p
+                  className={`font-semibold ${stat.small ? "text-sm" : "text-base"}`}
+                  style={{ color: stat.color ?? "var(--foreground)" }}
+                >
+                  {stat.value}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Categories ── */}
+        {coin.categories.length > 0 && (
+          <div
+            style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}
+            className="rounded-2xl p-5"
+          >
+            <h2 className="font-semibold mb-3" style={{ color: "var(--foreground)" }}>
+              🏷️ Categories
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {coin.categories.map((cat) => (
+                <span
+                  key={cat}
+                  className="text-xs px-3 py-1 rounded-full"
+                  style={{
+                    background: "rgba(124,58,237,0.15)",
+                    border: "1px solid rgba(124,58,237,0.3)",
+                    color: "#a78bfa",
+                  }}
+                >
+                  {cat}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Disclaimer ── */}
+        <div
+          style={{ background: "rgba(251,191,36,0.05)", border: "1px solid rgba(251,191,36,0.2)" }}
+          className="rounded-2xl p-4 text-sm"
+        >
+          <p style={{ color: "#fbbf24" }} className="font-semibold mb-1">⚠️ Not Financial Advice</p>
+          <p style={{ color: "#94a3b8" }}>
+            This analysis is algorithmic and for educational purposes only. Always DYOR before making
+            any investment decisions.
+          </p>
+        </div>
+      </div>
+    </main>
   );
 }
