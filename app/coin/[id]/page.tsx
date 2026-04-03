@@ -223,6 +223,145 @@ function getVerdict(coin: CoinData, risk: RiskScore): Verdict {
   };
 }
 
+// ─── Explanation ──────────────────────────────────────────────────────────
+interface Explanation {
+  verdictReasons: string[];
+  riskFactors: string[];
+  momentumSignals: string[];
+  keyMetrics: Array<{ label: string; value: string; impact: "positive" | "negative" | "neutral" }>;
+}
+
+function generateExplanation(coin: CoinData, verdict: Verdict, risk: RiskScore): Explanation {
+  const { price_change_percentage_24h: change24h, market_cap, total_volume, ath_change_percentage } =
+    coin.market_data;
+  const marketCap = market_cap.usd;
+  const volume = total_volume.usd;
+  const volumeRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
+  const athChange = ath_change_percentage.usd;
+
+  // ── Verdict reasons ──
+  const verdictReasons: string[] = [];
+
+  if (verdict.action === "AVOID") {
+    verdictReasons.push(`Risk score is ${risk.score}/100 — classified as Extreme`);
+    if (Math.abs(change24h) > 30)
+      verdictReasons.push(`Extreme 24h volatility (${change24h.toFixed(1)}%) detected`);
+    if (volumeRatio > 50)
+      verdictReasons.push(`Dangerously high volume ratio (${volumeRatio.toFixed(1)}%) signals instability`);
+    verdictReasons.push("Position not recommended for most investor profiles");
+  } else if (verdict.label === "Wait" && change24h > 20 && volumeRatio > 30) {
+    verdictReasons.push(`Strong 24h pump (+${change24h.toFixed(1)}%) combined with elevated volume ratio (${volumeRatio.toFixed(1)}%)`);
+    verdictReasons.push("Classic hype pattern — price may retrace after the surge");
+    verdictReasons.push("Waiting for consolidation reduces chasing risk");
+  } else if (verdict.label === "Buy the Dip") {
+    verdictReasons.push(`Established project (market cap ${fmt(marketCap)}) in significant decline (${change24h.toFixed(1)}%)`);
+    verdictReasons.push("Large-cap projects historically recover from short-term dips");
+    if (volumeRatio <= 30)
+      verdictReasons.push(`Volume ratio (${volumeRatio.toFixed(1)}%) is normal — no panic selling detected`);
+  } else if (verdict.label === "Falling Knife") {
+    verdictReasons.push(`Small-cap coin (${fmt(marketCap)}) dropping sharply (${change24h.toFixed(1)}%)`);
+    verdictReasons.push("Low market-cap projects carry higher risk during sharp declines");
+    verdictReasons.push("Entry before stabilization often leads to further losses");
+  } else if (verdict.label === "Healthy Growth") {
+    verdictReasons.push(`Moderate 24h gain (+${change24h.toFixed(1)}%) within a healthy range (5–15%)`);
+    verdictReasons.push(`Volume ratio (${volumeRatio.toFixed(1)}%) confirms genuine buying interest`);
+    verdictReasons.push("Steady growth with volume backing is a reliable uptrend signal");
+  } else if (verdict.label === "Stable") {
+    verdictReasons.push(`24h price change (${change24h.toFixed(1)}%) is within the −5% to +5% sideways range`);
+    verdictReasons.push("No directional catalyst detected at this time");
+    verdictReasons.push("Monitor for a breakout or breakdown before taking a position");
+  } else {
+    // Generic Wait / default
+    verdictReasons.push("No strong buy or sell signal identified");
+    if (risk.level === "High")
+      verdictReasons.push("High risk profile warrants caution and additional research");
+    verdictReasons.push("Monitor price action for a clearer entry or exit point");
+  }
+
+  // ── Risk factors (re-use existing factors with better wording) ──
+  const riskFactors: string[] = risk.factors;
+
+  // ── Momentum signals ──
+  const momentumSignals: string[] = [];
+  const absChange = Math.abs(change24h);
+
+  if (absChange > 20) {
+    momentumSignals.push(
+      `24h change: ${change24h >= 0 ? "+" : ""}${change24h.toFixed(1)}% — ${change24h > 0 ? "Strong upward" : "Strong downward"} momentum`
+    );
+  } else if (absChange > 10) {
+    momentumSignals.push(
+      `24h change: ${change24h >= 0 ? "+" : ""}${change24h.toFixed(1)}% — ${change24h > 0 ? "Moderate upward" : "Moderate downward"} momentum`
+    );
+  } else if (absChange > 5) {
+    momentumSignals.push(
+      `24h change: ${change24h >= 0 ? "+" : ""}${change24h.toFixed(1)}% — mild ${change24h > 0 ? "positive" : "negative"} movement`
+    );
+  } else {
+    momentumSignals.push(`24h change: ${change24h >= 0 ? "+" : ""}${change24h.toFixed(1)}% — price consolidating sideways`);
+  }
+
+  if (volumeRatio > 50) {
+    momentumSignals.push(`Trading volume: Extremely high activity (${volumeRatio.toFixed(1)}% of market cap)`);
+  } else if (volumeRatio > 30) {
+    momentumSignals.push(`Trading volume: High activity detected (${volumeRatio.toFixed(1)}% of market cap)`);
+  } else if (volumeRatio > 10) {
+    momentumSignals.push(`Trading volume: Normal activity (${volumeRatio.toFixed(1)}% of market cap)`);
+  } else {
+    momentumSignals.push(`Trading volume: Low activity (${volumeRatio.toFixed(1)}% of market cap)`);
+  }
+
+  if (change24h < -15) {
+    momentumSignals.push("Price below the −15% threshold — qualifies as a significant dip");
+  } else if (change24h > 15) {
+    momentumSignals.push("Price above the +15% threshold — qualifies as a significant pump");
+  }
+
+  if (athChange < -80) {
+    momentumSignals.push(`Price is ${Math.abs(athChange).toFixed(0)}% below all-time high — deep value territory`);
+  } else if (athChange < -50) {
+    momentumSignals.push(`Price is ${Math.abs(athChange).toFixed(0)}% below all-time high — significant discount`);
+  } else if (athChange >= -10) {
+    momentumSignals.push(`Price is near all-time high (${athChange.toFixed(1)}%) — elevated entry risk`);
+  }
+
+  // ── Key metrics ──
+  const keyMetrics: Explanation["keyMetrics"] = [
+    {
+      label: "Market Cap",
+      value: fmt(marketCap),
+      impact:
+        marketCap >= 10_000_000_000
+          ? "positive"
+          : marketCap >= 100_000_000
+          ? "neutral"
+          : "negative",
+    },
+    {
+      label: "Volume/Cap Ratio",
+      value: `${volumeRatio.toFixed(1)}%`,
+      impact: volumeRatio > 50 ? "negative" : volumeRatio > 30 ? "negative" : "neutral",
+    },
+    {
+      label: "24h Price Change",
+      value: `${change24h >= 0 ? "+" : ""}${change24h.toFixed(2)}%`,
+      impact: change24h >= 5 ? "positive" : change24h <= -15 ? "negative" : "neutral",
+    },
+    {
+      label: "Distance from ATH",
+      value: `${athChange.toFixed(1)}%`,
+      impact: athChange >= -10 ? "negative" : athChange >= -50 ? "neutral" : "positive",
+    },
+    {
+      label: "Risk Score",
+      value: `${risk.score}/100`,
+      impact: risk.score >= 70 ? "negative" : risk.score >= 45 ? "neutral" : "positive",
+    },
+  ];
+
+  return { verdictReasons, riskFactors, momentumSignals, keyMetrics };
+}
+
 // ─── Price Zones ──────────────────────────────────────────────────────────
 interface PriceZones {
   buyBelow: number;
@@ -383,6 +522,7 @@ export default async function CoinPage({
   const verdict = getVerdict(coin, risk);
   const zones = getPriceZones(price);
   const hype = getHypeScore({ priceChange24h: change24h, volumeRatio });
+  const explanation = generateExplanation(coin, verdict, risk);
 
   const rc = riskColors(risk.level);
   const vc = verdictColors(verdict.action);
@@ -507,6 +647,106 @@ export default async function CoinPage({
 
           {/* Hype Score Card */}
           <HypeScore result={hype} priceChange24h={change24h} volumeRatio={volumeRatio} />
+        </div>
+
+        {/* ── Decision Explanation ── */}
+        <div
+          style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}
+          className="rounded-2xl p-5 space-y-6"
+        >
+          <h2 className="font-semibold text-lg" style={{ color: "var(--foreground)" }}>
+            📊 Decision Explanation
+          </h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            {/* Why This Verdict? */}
+            <div>
+              <h3 className="text-sm font-semibold mb-3" style={{ color: "#94a3b8" }}>
+                Why &ldquo;{verdict.label}&rdquo;?
+              </h3>
+              <ul className="space-y-2">
+                {explanation.verdictReasons.map((reason, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "#cbd5e1" }}>
+                    <span style={{ color: vc.text, marginTop: "2px", flexShrink: 0 }}>•</span>
+                    {reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Risk Factors */}
+            <div>
+              <h3 className="text-sm font-semibold mb-3" style={{ color: "#94a3b8" }}>
+                Risk Factors
+              </h3>
+              <ul className="space-y-2">
+                {explanation.riskFactors.map((factor, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "#cbd5e1" }}>
+                    <span style={{ color: rc.text, marginTop: "2px", flexShrink: 0 }}>•</span>
+                    {factor}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Momentum Analysis */}
+            <div>
+              <h3 className="text-sm font-semibold mb-3" style={{ color: "#94a3b8" }}>
+                Momentum Analysis
+              </h3>
+              <ul className="space-y-2">
+                {explanation.momentumSignals.map((signal, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "#cbd5e1" }}>
+                    <span style={{ color: "#818cf8", marginTop: "2px", flexShrink: 0 }}>•</span>
+                    {signal}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Key Metrics */}
+            <div>
+              <h3 className="text-sm font-semibold mb-3" style={{ color: "#94a3b8" }}>
+                Key Metrics
+              </h3>
+              <ul className="space-y-2">
+                {explanation.keyMetrics.map((metric) => {
+                  const impactColor =
+                    metric.impact === "positive"
+                      ? "#4ade80"
+                      : metric.impact === "negative"
+                      ? "#f87171"
+                      : "#94a3b8";
+                  const impactLabel =
+                    metric.impact === "positive"
+                      ? "Positive"
+                      : metric.impact === "negative"
+                      ? "Negative"
+                      : "Neutral";
+                  return (
+                    <li key={metric.label} className="flex items-center justify-between text-sm">
+                      <span style={{ color: "#94a3b8" }}>{metric.label}</span>
+                      <span className="flex items-center gap-2">
+                        <span style={{ color: "var(--foreground)" }} className="font-medium">
+                          {metric.value}
+                        </span>
+                        <span
+                          className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                          style={{
+                            color: impactColor,
+                            background: `${impactColor}1a`,
+                            border: `1px solid ${impactColor}40`,
+                          }}
+                        >
+                          {impactLabel}
+                        </span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </div>
         </div>
 
         {/* ── Price Zones ── */}
