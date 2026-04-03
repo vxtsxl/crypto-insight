@@ -1,0 +1,121 @@
+import { NextResponse } from "next/server";
+
+const SYMBOL_MAP: Record<string, string> = {
+  bitcoin: "BTCUSDT",
+  ethereum: "ETHUSDT",
+  solana: "SOLUSDT",
+  cardano: "ADAUSDT",
+  pepe: "PEPEUSDT",
+  "shiba-inu": "SHIBUSDT",
+  dogecoin: "DOGEUSDT",
+  binancecoin: "BNBUSDT",
+  ripple: "XRPUSDT",
+  polkadot: "DOTUSDT",
+};
+
+interface CoinGeckoResponse {
+  id: string;
+  name: string;
+  symbol: string;
+  categories: string[];
+  market_data: {
+    current_price: { usd: number };
+    price_change_percentage_24h: number;
+    market_cap: { usd: number };
+    total_volume: { usd: number };
+    high_24h: { usd: number };
+    low_24h: { usd: number };
+  };
+}
+
+interface BinanceTickerResponse {
+  lastPrice: string;
+  priceChangePercent: string;
+  quoteVolume: string;
+  highPrice: string;
+  lowPrice: string;
+}
+
+interface CoinData {
+  id: string;
+  name: string;
+  symbol: string;
+  currentPrice: number;
+  priceChange24h: number;
+  marketCap: number | null;
+  volume24h: number;
+  high24h: number;
+  low24h: number;
+  categories: string[];
+  source: "binance" | "coingecko";
+}
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+
+  if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+    return NextResponse.json({ error: "Invalid coin ID" }, { status: 404 });
+  }
+
+  const binanceSymbol = SYMBOL_MAP[id] ?? null;
+
+  const [geckoResult, binanceResult] = await Promise.all([
+    fetch(
+      `https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&community_data=false&developer_data=false`,
+      { next: { revalidate: 30 } }
+    )
+      .then((r) => (r.ok ? (r.json() as Promise<CoinGeckoResponse>) : null))
+      .catch(() => null),
+
+    binanceSymbol
+      ? fetch(
+          `https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`,
+          { next: { revalidate: 30 } }
+        )
+          .then((r) =>
+            r.ok ? (r.json() as Promise<BinanceTickerResponse>) : null
+          )
+          .catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  if (!geckoResult) {
+    return NextResponse.json({ error: "Coin not found" }, { status: 404 });
+  }
+
+  const useBinance = binanceResult !== null;
+
+  const safeParse = (val: string, fallback: number): number => {
+    const n = parseFloat(val);
+    return isNaN(n) ? fallback : n;
+  };
+
+  const data: CoinData = {
+    id: geckoResult.id,
+    name: geckoResult.name,
+    symbol: geckoResult.symbol,
+    currentPrice: useBinance
+      ? safeParse(binanceResult!.lastPrice, geckoResult.market_data?.current_price?.usd ?? 0)
+      : geckoResult.market_data?.current_price?.usd ?? 0,
+    priceChange24h: useBinance
+      ? safeParse(binanceResult!.priceChangePercent, geckoResult.market_data?.price_change_percentage_24h ?? 0)
+      : geckoResult.market_data?.price_change_percentage_24h ?? 0,
+    marketCap: geckoResult.market_data?.market_cap?.usd ?? null,
+    volume24h: useBinance
+      ? safeParse(binanceResult!.quoteVolume, geckoResult.market_data?.total_volume?.usd ?? 0)
+      : geckoResult.market_data?.total_volume?.usd ?? 0,
+    high24h: useBinance
+      ? safeParse(binanceResult!.highPrice, geckoResult.market_data?.high_24h?.usd ?? 0)
+      : geckoResult.market_data?.high_24h?.usd ?? 0,
+    low24h: useBinance
+      ? safeParse(binanceResult!.lowPrice, geckoResult.market_data?.low_24h?.usd ?? 0)
+      : geckoResult.market_data?.low_24h?.usd ?? 0,
+    categories: geckoResult.categories,
+    source: useBinance ? "binance" : "coingecko",
+  };
+
+  return NextResponse.json(data);
+}
