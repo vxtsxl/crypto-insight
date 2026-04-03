@@ -429,7 +429,8 @@ function normalizeData(data: CoinData, imageUrl: string): CoinData {
         market_cap: { usd: data.marketCap ?? 0 },
         total_volume: { usd: data.volume24h ?? 0 },
         price_change_percentage_24h: data.priceChange24h ?? 0,
-        // 7d change, ATH, and supply are not available from the unified API route
+        // 7d change and supply are not available from the unified API route.
+        // ATH is approximated with the 24h high; ath_change_percentage is null (unavailable).
         price_change_percentage_7d: 0,
         ath: { usd: data.high24h ?? data.currentPrice },
         ath_change_percentage: { usd: null },
