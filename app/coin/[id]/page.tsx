@@ -536,7 +536,7 @@ export default async function CoinPage({
   const change7d = coin.market_data.price_change_percentage_7d;
   const marketCap = coin.market_data.market_cap.usd;
   const volume = coin.market_data.total_volume.usd;
-  const athChange = coin.market_data.ath_change_percentage?.usd ?? null;
+  const athChange = coin.market_data.ath_change_percentage.usd ?? null;
   const volumeRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
 
   let risk: RiskScore | null = null;
