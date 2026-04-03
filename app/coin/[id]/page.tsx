@@ -15,7 +15,7 @@ interface CoinData {
     price_change_percentage_24h: number;
     price_change_percentage_7d: number;
     ath: { usd: number };
-    ath_change_percentage: { usd: number };
+    ath_change_percentage: { usd: number | null };
     circulating_supply: number;
     total_supply: number | null;
   };
@@ -40,14 +40,19 @@ interface RiskScore {
 }
 
 function calculateRisk(coin: CoinData): RiskScore {
+  if (!coin.market_data) {
+    console.error("calculateRisk: market_data is missing");
+    return { level: "High", score: 50, factors: ["Insufficient data to assess risk"] };
+  }
+
   const factors: string[] = [];
   let score = 0;
 
   const { market_cap, total_volume, price_change_percentage_24h } =
     coin.market_data;
-  const marketCap = market_cap.usd;
-  const volume = total_volume.usd;
-  const change24h = price_change_percentage_24h;
+  const marketCap = market_cap?.usd ?? 0;
+  const volume = total_volume?.usd ?? 0;
+  const change24h = price_change_percentage_24h ?? 0;
 
   // Market cap risk (0-40 pts)
   if (marketCap < 10_000_000) {
@@ -130,11 +135,22 @@ interface Verdict {
 }
 
 function getVerdict(coin: CoinData, risk: RiskScore): Verdict {
+  if (!coin.market_data) {
+    console.error("getVerdict: market_data is missing");
+    return {
+      action: "NEUTRAL",
+      label: "Insufficient Data",
+      emoji: "❓",
+      reason: "Not enough market data available to generate a verdict.",
+      confidence: "Low",
+    };
+  }
+
   const { price_change_percentage_24h: change24h, market_cap, total_volume } =
     coin.market_data;
-  const marketCap = market_cap.usd;
+  const marketCap = market_cap?.usd ?? 0;
   const volumeRatio =
-    marketCap > 0 ? (total_volume.usd / marketCap) * 100 : 0;
+    marketCap > 0 ? ((total_volume?.usd ?? 0) / marketCap) * 100 : 0;
 
   // 1. Extreme risk → always Avoid
   if (risk.level === "Extreme") {
@@ -234,10 +250,11 @@ interface Explanation {
 function generateExplanation(coin: CoinData, verdict: Verdict, risk: RiskScore): Explanation {
   const { price_change_percentage_24h: change24h, market_cap, total_volume, ath_change_percentage } =
     coin.market_data;
-  const marketCap = market_cap.usd;
-  const volume = total_volume.usd;
+  const marketCap = market_cap?.usd ?? 0;
+  const volume = total_volume?.usd ?? 0;
   const volumeRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
-  const athChange = ath_change_percentage.usd;
+  // ath_change_percentage.usd is null when ATH data is unavailable (e.g. from normalised API response)
+  const athChange = ath_change_percentage?.usd ?? null;
 
   // ── Verdict reasons ──
   const verdictReasons: string[] = [];
@@ -317,12 +334,14 @@ function generateExplanation(coin: CoinData, verdict: Verdict, risk: RiskScore):
     momentumSignals.push("Price above the +15% threshold — qualifies as a significant pump");
   }
 
-  if (athChange < -80) {
-    momentumSignals.push(`Price is ${Math.abs(athChange).toFixed(0)}% below all-time high — deep value territory`);
-  } else if (athChange < -50) {
-    momentumSignals.push(`Price is ${Math.abs(athChange).toFixed(0)}% below all-time high — significant discount`);
-  } else if (athChange >= -10) {
-    momentumSignals.push(`Price is near all-time high (${athChange.toFixed(1)}%) — elevated entry risk`);
+  if (athChange !== null) {
+    if (athChange < -80) {
+      momentumSignals.push(`Price is ${Math.abs(athChange).toFixed(0)}% below all-time high — deep value territory`);
+    } else if (athChange < -50) {
+      momentumSignals.push(`Price is ${Math.abs(athChange).toFixed(0)}% below all-time high — significant discount`);
+    } else if (athChange >= -10) {
+      momentumSignals.push(`Price is near all-time high (${athChange.toFixed(1)}%) — elevated entry risk`);
+    }
   }
 
   // ── Key metrics ──
@@ -347,11 +366,13 @@ function generateExplanation(coin: CoinData, verdict: Verdict, risk: RiskScore):
       value: `${change24h >= 0 ? "+" : ""}${change24h.toFixed(2)}%`,
       impact: change24h >= 5 ? "positive" : change24h <= -15 ? "negative" : "neutral",
     },
-    {
-      label: "Distance from ATH",
-      value: `${athChange.toFixed(1)}%`,
-      impact: athChange >= -10 ? "negative" : athChange >= -50 ? "neutral" : "positive",
-    },
+    ...(athChange !== null
+      ? [{
+          label: "Distance from ATH",
+          value: `${athChange.toFixed(1)}%`,
+          impact: (athChange >= -10 ? "negative" : athChange >= -50 ? "neutral" : "positive") as "positive" | "negative" | "neutral",
+        }]
+      : []),
     {
       label: "Risk Score",
       value: `${risk.score}/100`,
@@ -411,7 +432,7 @@ function normalizeData(data: CoinData, imageUrl: string): CoinData {
         // 7d change, ATH, and supply are not available from the unified API route
         price_change_percentage_7d: 0,
         ath: { usd: data.high24h ?? data.currentPrice },
-        ath_change_percentage: { usd: 0 },
+        ath_change_percentage: { usd: null },
         circulating_supply: 0,
         total_supply: null,
       },
@@ -515,17 +536,22 @@ export default async function CoinPage({
   const change7d = coin.market_data.price_change_percentage_7d;
   const marketCap = coin.market_data.market_cap.usd;
   const volume = coin.market_data.total_volume.usd;
-  const athChange = coin.market_data.ath_change_percentage.usd;
+  const athChange = coin.market_data.ath_change_percentage?.usd ?? null;
   const volumeRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
 
-  const risk = calculateRisk(coin);
-  const verdict = getVerdict(coin, risk);
+  let risk: RiskScore | null = null;
+  let verdict: Verdict | null = null;
+  let explanation: Explanation | null = null;
+  try {
+    risk = calculateRisk(coin);
+    verdict = getVerdict(coin, risk);
+    explanation = generateExplanation(coin, verdict, risk);
+  } catch (err) {
+    console.error(`[coin/${id}] Decision engine calculation failed:`, err);
+  }
+
   const zones = getPriceZones(price);
   const hype = getHypeScore({ priceChange24h: change24h, volumeRatio });
-  const explanation = generateExplanation(coin, verdict, risk);
-
-  const rc = riskColors(risk.level);
-  const vc = verdictColors(verdict.action);
 
   return (
     <main
@@ -587,69 +613,101 @@ export default async function CoinPage({
         </div>
 
         {/* ── Risk + Verdict + Hype Score ── */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {/* Risk Card */}
-          <div
-            style={{ background: rc.bg, border: `1px solid ${rc.border}` }}
-            className="rounded-2xl p-5"
-          >
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-medium" style={{ color: "#94a3b8" }}>Risk Level</p>
-              <span
-                className="text-xs px-2 py-0.5 rounded-full font-semibold"
-                style={{ background: rc.bg, color: rc.text, border: `1px solid ${rc.border}` }}
-              >
-                {risk.level}
-              </span>
-            </div>
-            {/* Progress bar */}
-            <div className="w-full h-2 rounded-full mb-3" style={{ background: "rgba(255,255,255,0.1)" }}>
-              <div
-                className="h-2 rounded-full"
-                style={{ width: `${risk.score}%`, background: rc.text }}
-              />
-            </div>
-            <p className="text-2xl font-bold mb-3" style={{ color: rc.text }}>
-              {risk.score}/100
-            </p>
-            <ul className="space-y-1">
-              {risk.factors.map((f) => (
-                <li key={f} className="text-xs flex items-center gap-2" style={{ color: "#94a3b8" }}>
-                  <span style={{ color: rc.text }}>•</span> {f}
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Verdict Card */}
-          <div
-            style={{ background: vc.bg, border: `1px solid ${vc.border}` }}
-            className="rounded-2xl p-5"
-          >
-            <p className="text-sm font-medium mb-3" style={{ color: "#94a3b8" }}>Smart Verdict</p>
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-4xl">{verdict.emoji}</span>
-              <div>
-                <p className="text-2xl font-bold" style={{ color: vc.text }}>
-                  {verdict.label}
-                </p>
-                <p
-                  className="text-xs"
-                  style={{ color: "#64748b" }}
+        {risk && verdict ? (
+          (() => {
+            const rc = riskColors(risk.level);
+            const vc = verdictColors(verdict.action);
+            return (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Risk Card */}
+            <div
+              style={{ background: rc.bg, border: `1px solid ${rc.border}` }}
+              className="rounded-2xl p-5"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium" style={{ color: "#94a3b8" }}>Risk Level</p>
+                <span
+                  className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                  style={{ background: rc.bg, color: rc.text, border: `1px solid ${rc.border}` }}
                 >
-                  Confidence:{" "}
-                  <span style={{ color: vc.text }}>{verdict.confidence}</span>
+                  {risk.level}
+                </span>
+              </div>
+              {/* Progress bar */}
+              <div className="w-full h-2 rounded-full mb-3" style={{ background: "rgba(255,255,255,0.1)" }}>
+                <div
+                  className="h-2 rounded-full"
+                  style={{ width: `${risk.score}%`, background: rc.text }}
+                />
+              </div>
+              <p className="text-2xl font-bold mb-3" style={{ color: rc.text }}>
+                {risk.score}/100
+              </p>
+              <ul className="space-y-1">
+                {risk.factors.map((f) => (
+                  <li key={f} className="text-xs flex items-center gap-2" style={{ color: "#94a3b8" }}>
+                    <span style={{ color: rc.text }}>•</span> {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Verdict Card */}
+            <div
+              style={{ background: vc.bg, border: `1px solid ${vc.border}` }}
+              className="rounded-2xl p-5"
+            >
+              <p className="text-sm font-medium mb-3" style={{ color: "#94a3b8" }}>Smart Verdict</p>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-4xl">{verdict.emoji}</span>
+                <div>
+                  <p className="text-2xl font-bold" style={{ color: vc.text }}>
+                    {verdict.label}
+                  </p>
+                  <p
+                    className="text-xs"
+                    style={{ color: "#64748b" }}
+                  >
+                    Confidence:{" "}
+                    <span style={{ color: vc.text }}>{verdict.confidence}</span>
+                  </p>
+                </div>
+              </div>
+              <p className="text-sm" style={{ color: "#94a3b8" }}>{verdict.reason}</p>
+            </div>
+
+            {/* Hype Score Card */}
+            <HypeScore result={hype} priceChange24h={change24h} volumeRatio={volumeRatio} />
+          </div>
+            );
+          })()
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div
+              style={{ background: "rgba(148,163,184,0.05)", border: "1px solid rgba(148,163,184,0.2)" }}
+              className="sm:col-span-2 rounded-2xl p-5 flex items-center gap-4"
+            >
+              <span className="text-3xl">⚠️</span>
+              <div>
+                <p className="font-semibold mb-1" style={{ color: "var(--foreground)" }}>
+                  Analysis Unavailable
+                </p>
+                <p className="text-sm" style={{ color: "#94a3b8" }}>
+                  Insufficient market data to generate Risk Level and Smart Verdict for this coin.
                 </p>
               </div>
             </div>
-            <p className="text-sm" style={{ color: "#94a3b8" }}>{verdict.reason}</p>
+            {/* Hype Score is still calculated from available data */}
+            <HypeScore result={hype} priceChange24h={change24h} volumeRatio={volumeRatio} />
           </div>
-
-          {/* Hype Score Card */}
-          <HypeScore result={hype} priceChange24h={change24h} volumeRatio={volumeRatio} />
-        </div>
+        )}
 
         {/* ── Decision Explanation ── */}
+        {risk && verdict && explanation ? (
+        (() => {
+          const rc = riskColors(risk.level);
+          const vc = verdictColors(verdict.action);
+          return (
         <div
           style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}
           className="rounded-2xl p-5 space-y-6"
@@ -748,6 +806,9 @@ export default async function CoinPage({
             </div>
           </div>
         </div>
+          );
+        })()
+        ) : null}
 
         {/* ── Price Zones ── */}
         <div
@@ -805,8 +866,8 @@ export default async function CoinPage({
               },
               {
                 label: "From ATH",
-                value: `${athChange?.toFixed(1)}%`,
-                color: athChange >= 0 ? "#4ade80" : "#f87171",
+                value: athChange !== null ? `${athChange.toFixed(1)}%` : "—",
+                color: athChange !== null ? (athChange >= 0 ? "#4ade80" : "#f87171") : undefined,
               },
               {
                 label: "Categories",
