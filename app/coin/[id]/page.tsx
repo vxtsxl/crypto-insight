@@ -367,11 +367,15 @@ function generateExplanation(coin: CoinData, verdict: Verdict, risk: RiskScore):
       impact: change24h >= 5 ? "positive" : change24h <= -15 ? "negative" : "neutral",
     },
     ...(athChange !== null
-      ? [{
-          label: "Distance from ATH",
-          value: `${athChange.toFixed(1)}%`,
-          impact: (athChange >= -10 ? "negative" : athChange >= -50 ? "neutral" : "positive") as "positive" | "negative" | "neutral",
-        }]
+      ? (() => {
+          const athImpact: "positive" | "negative" | "neutral" =
+            athChange >= -10 ? "negative" : athChange >= -50 ? "neutral" : "positive";
+          return [{
+            label: "Distance from ATH",
+            value: `${athChange.toFixed(1)}%`,
+            impact: athImpact,
+          }];
+        })()
       : []),
     {
       label: "Risk Score",
@@ -490,6 +494,198 @@ function verdictColors(action: VerdictAction) {
     case "AVOID": return { bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.4)", text: "#f87171" };
     case "NEUTRAL": return { bg: "rgba(148,163,184,0.1)", border: "rgba(148,163,184,0.4)", text: "#94a3b8" };
   }
+}
+
+// ─── Decision Sub-components ──────────────────────────────────────────────
+import type { HypeScoreResult } from "@/lib/hypeScoreCalculator";
+
+function DecisionEngineCards({
+  risk,
+  verdict,
+  hype,
+  priceChange24h,
+  volumeRatio,
+}: {
+  risk: RiskScore;
+  verdict: Verdict;
+  hype: HypeScoreResult;
+  priceChange24h: number;
+  volumeRatio: number;
+}) {
+  const rc = riskColors(risk.level);
+  const vc = verdictColors(verdict.action);
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* Risk Card */}
+      <div
+        style={{ background: rc.bg, border: `1px solid ${rc.border}` }}
+        className="rounded-2xl p-5"
+      >
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-medium" style={{ color: "#94a3b8" }}>Risk Level</p>
+          <span
+            className="text-xs px-2 py-0.5 rounded-full font-semibold"
+            style={{ background: rc.bg, color: rc.text, border: `1px solid ${rc.border}` }}
+          >
+            {risk.level}
+          </span>
+        </div>
+        <div className="w-full h-2 rounded-full mb-3" style={{ background: "rgba(255,255,255,0.1)" }}>
+          <div
+            className="h-2 rounded-full"
+            style={{ width: `${risk.score}%`, background: rc.text }}
+          />
+        </div>
+        <p className="text-2xl font-bold mb-3" style={{ color: rc.text }}>
+          {risk.score}/100
+        </p>
+        <ul className="space-y-1">
+          {risk.factors.map((f) => (
+            <li key={f} className="text-xs flex items-center gap-2" style={{ color: "#94a3b8" }}>
+              <span style={{ color: rc.text }}>•</span> {f}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Verdict Card */}
+      <div
+        style={{ background: vc.bg, border: `1px solid ${vc.border}` }}
+        className="rounded-2xl p-5"
+      >
+        <p className="text-sm font-medium mb-3" style={{ color: "#94a3b8" }}>Smart Verdict</p>
+        <div className="flex items-center gap-3 mb-3">
+          <span className="text-4xl">{verdict.emoji}</span>
+          <div>
+            <p className="text-2xl font-bold" style={{ color: vc.text }}>
+              {verdict.label}
+            </p>
+            <p className="text-xs" style={{ color: "#64748b" }}>
+              Confidence:{" "}
+              <span style={{ color: vc.text }}>{verdict.confidence}</span>
+            </p>
+          </div>
+        </div>
+        <p className="text-sm" style={{ color: "#94a3b8" }}>{verdict.reason}</p>
+      </div>
+
+      {/* Hype Score Card */}
+      <HypeScore result={hype} priceChange24h={priceChange24h} volumeRatio={volumeRatio} />
+    </div>
+  );
+}
+
+function DecisionExplanationCard({
+  risk,
+  verdict,
+  explanation,
+}: {
+  risk: RiskScore;
+  verdict: Verdict;
+  explanation: Explanation;
+}) {
+  const rc = riskColors(risk.level);
+  const vc = verdictColors(verdict.action);
+  return (
+    <div
+      style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}
+      className="rounded-2xl p-5 space-y-6"
+    >
+      <h2 className="font-semibold text-lg" style={{ color: "var(--foreground)" }}>
+        📊 Decision Explanation
+      </h2>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        {/* Why This Verdict? */}
+        <div>
+          <h3 className="text-sm font-semibold mb-3" style={{ color: "#94a3b8" }}>
+            Why &ldquo;{verdict.label}&rdquo;?
+          </h3>
+          <ul className="space-y-2">
+            {explanation.verdictReasons.map((reason, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "#cbd5e1" }}>
+                <span style={{ color: vc.text, marginTop: "2px", flexShrink: 0 }}>•</span>
+                {reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Risk Factors */}
+        <div>
+          <h3 className="text-sm font-semibold mb-3" style={{ color: "#94a3b8" }}>
+            Risk Factors
+          </h3>
+          <ul className="space-y-2">
+            {explanation.riskFactors.map((factor, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "#cbd5e1" }}>
+                <span style={{ color: rc.text, marginTop: "2px", flexShrink: 0 }}>•</span>
+                {factor}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Momentum Analysis */}
+        <div>
+          <h3 className="text-sm font-semibold mb-3" style={{ color: "#94a3b8" }}>
+            Momentum Analysis
+          </h3>
+          <ul className="space-y-2">
+            {explanation.momentumSignals.map((signal, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "#cbd5e1" }}>
+                <span style={{ color: "#818cf8", marginTop: "2px", flexShrink: 0 }}>•</span>
+                {signal}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Key Metrics */}
+        <div>
+          <h3 className="text-sm font-semibold mb-3" style={{ color: "#94a3b8" }}>
+            Key Metrics
+          </h3>
+          <ul className="space-y-2">
+            {explanation.keyMetrics.map((metric) => {
+              const impactColor =
+                metric.impact === "positive"
+                  ? "#4ade80"
+                  : metric.impact === "negative"
+                  ? "#f87171"
+                  : "#94a3b8";
+              const impactLabel =
+                metric.impact === "positive"
+                  ? "Positive"
+                  : metric.impact === "negative"
+                  ? "Negative"
+                  : "Neutral";
+              return (
+                <li key={metric.label} className="flex items-center justify-between text-sm">
+                  <span style={{ color: "#94a3b8" }}>{metric.label}</span>
+                  <span className="flex items-center gap-2">
+                    <span style={{ color: "var(--foreground)" }} className="font-medium">
+                      {metric.value}
+                    </span>
+                    <span
+                      className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                      style={{
+                        color: impactColor,
+                        background: `${impactColor}1a`,
+                        border: `1px solid ${impactColor}40`,
+                      }}
+                    >
+                      {impactLabel}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── Page Component ────────────────────────────────────────────────────────
@@ -615,73 +811,13 @@ export default async function CoinPage({
 
         {/* ── Risk + Verdict + Hype Score ── */}
         {risk && verdict ? (
-          (() => {
-            const rc = riskColors(risk.level);
-            const vc = verdictColors(verdict.action);
-            return (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {/* Risk Card */}
-            <div
-              style={{ background: rc.bg, border: `1px solid ${rc.border}` }}
-              className="rounded-2xl p-5"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium" style={{ color: "#94a3b8" }}>Risk Level</p>
-                <span
-                  className="text-xs px-2 py-0.5 rounded-full font-semibold"
-                  style={{ background: rc.bg, color: rc.text, border: `1px solid ${rc.border}` }}
-                >
-                  {risk.level}
-                </span>
-              </div>
-              {/* Progress bar */}
-              <div className="w-full h-2 rounded-full mb-3" style={{ background: "rgba(255,255,255,0.1)" }}>
-                <div
-                  className="h-2 rounded-full"
-                  style={{ width: `${risk.score}%`, background: rc.text }}
-                />
-              </div>
-              <p className="text-2xl font-bold mb-3" style={{ color: rc.text }}>
-                {risk.score}/100
-              </p>
-              <ul className="space-y-1">
-                {risk.factors.map((f) => (
-                  <li key={f} className="text-xs flex items-center gap-2" style={{ color: "#94a3b8" }}>
-                    <span style={{ color: rc.text }}>•</span> {f}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Verdict Card */}
-            <div
-              style={{ background: vc.bg, border: `1px solid ${vc.border}` }}
-              className="rounded-2xl p-5"
-            >
-              <p className="text-sm font-medium mb-3" style={{ color: "#94a3b8" }}>Smart Verdict</p>
-              <div className="flex items-center gap-3 mb-3">
-                <span className="text-4xl">{verdict.emoji}</span>
-                <div>
-                  <p className="text-2xl font-bold" style={{ color: vc.text }}>
-                    {verdict.label}
-                  </p>
-                  <p
-                    className="text-xs"
-                    style={{ color: "#64748b" }}
-                  >
-                    Confidence:{" "}
-                    <span style={{ color: vc.text }}>{verdict.confidence}</span>
-                  </p>
-                </div>
-              </div>
-              <p className="text-sm" style={{ color: "#94a3b8" }}>{verdict.reason}</p>
-            </div>
-
-            {/* Hype Score Card */}
-            <HypeScore result={hype} priceChange24h={change24h} volumeRatio={volumeRatio} />
-          </div>
-            );
-          })()
+          <DecisionEngineCards
+            risk={risk}
+            verdict={verdict}
+            hype={hype}
+            priceChange24h={change24h}
+            volumeRatio={volumeRatio}
+          />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div
@@ -705,110 +841,7 @@ export default async function CoinPage({
 
         {/* ── Decision Explanation ── */}
         {risk && verdict && explanation ? (
-        (() => {
-          const rc = riskColors(risk.level);
-          const vc = verdictColors(verdict.action);
-          return (
-        <div
-          style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}
-          className="rounded-2xl p-5 space-y-6"
-        >
-          <h2 className="font-semibold text-lg" style={{ color: "var(--foreground)" }}>
-            📊 Decision Explanation
-          </h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {/* Why This Verdict? */}
-            <div>
-              <h3 className="text-sm font-semibold mb-3" style={{ color: "#94a3b8" }}>
-                Why &ldquo;{verdict.label}&rdquo;?
-              </h3>
-              <ul className="space-y-2">
-                {explanation.verdictReasons.map((reason, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "#cbd5e1" }}>
-                    <span style={{ color: vc.text, marginTop: "2px", flexShrink: 0 }}>•</span>
-                    {reason}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Risk Factors */}
-            <div>
-              <h3 className="text-sm font-semibold mb-3" style={{ color: "#94a3b8" }}>
-                Risk Factors
-              </h3>
-              <ul className="space-y-2">
-                {explanation.riskFactors.map((factor, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "#cbd5e1" }}>
-                    <span style={{ color: rc.text, marginTop: "2px", flexShrink: 0 }}>•</span>
-                    {factor}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Momentum Analysis */}
-            <div>
-              <h3 className="text-sm font-semibold mb-3" style={{ color: "#94a3b8" }}>
-                Momentum Analysis
-              </h3>
-              <ul className="space-y-2">
-                {explanation.momentumSignals.map((signal, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "#cbd5e1" }}>
-                    <span style={{ color: "#818cf8", marginTop: "2px", flexShrink: 0 }}>•</span>
-                    {signal}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Key Metrics */}
-            <div>
-              <h3 className="text-sm font-semibold mb-3" style={{ color: "#94a3b8" }}>
-                Key Metrics
-              </h3>
-              <ul className="space-y-2">
-                {explanation.keyMetrics.map((metric) => {
-                  const impactColor =
-                    metric.impact === "positive"
-                      ? "#4ade80"
-                      : metric.impact === "negative"
-                      ? "#f87171"
-                      : "#94a3b8";
-                  const impactLabel =
-                    metric.impact === "positive"
-                      ? "Positive"
-                      : metric.impact === "negative"
-                      ? "Negative"
-                      : "Neutral";
-                  return (
-                    <li key={metric.label} className="flex items-center justify-between text-sm">
-                      <span style={{ color: "#94a3b8" }}>{metric.label}</span>
-                      <span className="flex items-center gap-2">
-                        <span style={{ color: "var(--foreground)" }} className="font-medium">
-                          {metric.value}
-                        </span>
-                        <span
-                          className="text-xs px-2 py-0.5 rounded-full font-semibold"
-                          style={{
-                            color: impactColor,
-                            background: `${impactColor}1a`,
-                            border: `1px solid ${impactColor}40`,
-                          }}
-                        >
-                          {impactLabel}
-                        </span>
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          </div>
-        </div>
-          );
-        })()
+          <DecisionExplanationCard risk={risk} verdict={verdict} explanation={explanation} />
         ) : null}
 
         {/* ── Price Zones ── */}
