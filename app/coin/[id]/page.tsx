@@ -1,6 +1,7 @@
 import Link from "next/link";
 import HypeScore from "@/components/HypeScore/HypeScore";
 import { getHypeScore } from "@/lib/hypeScoreCalculator";
+import type { HypeScoreResult } from "@/lib/hypeScoreCalculator";
 
 interface CoinData {
   id: string;
@@ -345,6 +346,12 @@ function generateExplanation(coin: CoinData, verdict: Verdict, risk: RiskScore):
   }
 
   // ── Key metrics ──
+  type MetricImpact = "positive" | "negative" | "neutral";
+  const athImpact: MetricImpact | null =
+    athChange !== null
+      ? athChange >= -10 ? "negative" : athChange >= -50 ? "neutral" : "positive"
+      : null;
+
   const keyMetrics: Explanation["keyMetrics"] = [
     {
       label: "Market Cap",
@@ -366,16 +373,8 @@ function generateExplanation(coin: CoinData, verdict: Verdict, risk: RiskScore):
       value: `${change24h >= 0 ? "+" : ""}${change24h.toFixed(2)}%`,
       impact: change24h >= 5 ? "positive" : change24h <= -15 ? "negative" : "neutral",
     },
-    ...(athChange !== null
-      ? (() => {
-          const athImpact: "positive" | "negative" | "neutral" =
-            athChange >= -10 ? "negative" : athChange >= -50 ? "neutral" : "positive";
-          return [{
-            label: "Distance from ATH",
-            value: `${athChange.toFixed(1)}%`,
-            impact: athImpact,
-          }];
-        })()
+    ...(athChange !== null && athImpact !== null
+      ? [{ label: "Distance from ATH", value: `${athChange.toFixed(1)}%`, impact: athImpact }]
       : []),
     {
       label: "Risk Score",
@@ -497,8 +496,6 @@ function verdictColors(action: VerdictAction) {
 }
 
 // ─── Decision Sub-components ──────────────────────────────────────────────
-import type { HypeScoreResult } from "@/lib/hypeScoreCalculator";
-
 function DecisionEngineCards({
   risk,
   verdict,
