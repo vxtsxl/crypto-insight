@@ -93,12 +93,20 @@ export async function GET(
     return isNaN(n) ? fallback : n;
   };
 
+  // For price fields, treat 0 as invalid and fall back to the alternative source.
+  // Binance can return "0.00000000" during brief data gaps; CoinGecko is a better
+  // fallback than silently returning $0 to the UI.
+  const safePositiveNum = (val: string, fallback: number): number => {
+    const n = parseFloat(val);
+    return isNaN(n) || n <= 0 ? fallback : n;
+  };
+
   const data: CoinData = {
     id: geckoResult.id,
     name: geckoResult.name,
     symbol: geckoResult.symbol,
     currentPrice: useBinance
-      ? safeParse(binanceResult!.lastPrice, geckoResult.market_data?.current_price?.usd ?? 0)
+      ? safePositiveNum(binanceResult!.lastPrice, geckoResult.market_data?.current_price?.usd ?? 0)
       : geckoResult.market_data?.current_price?.usd ?? 0,
     priceChange24h: useBinance
       ? safeParse(binanceResult!.priceChangePercent, geckoResult.market_data?.price_change_percentage_24h ?? 0)
@@ -108,10 +116,10 @@ export async function GET(
       ? safeParse(binanceResult!.quoteVolume, geckoResult.market_data?.total_volume?.usd ?? 0)
       : geckoResult.market_data?.total_volume?.usd ?? 0,
     high24h: useBinance
-      ? safeParse(binanceResult!.highPrice, geckoResult.market_data?.high_24h?.usd ?? 0)
+      ? safePositiveNum(binanceResult!.highPrice, geckoResult.market_data?.high_24h?.usd ?? 0)
       : geckoResult.market_data?.high_24h?.usd ?? 0,
     low24h: useBinance
-      ? safeParse(binanceResult!.lowPrice, geckoResult.market_data?.low_24h?.usd ?? 0)
+      ? safePositiveNum(binanceResult!.lowPrice, geckoResult.market_data?.low_24h?.usd ?? 0)
       : geckoResult.market_data?.low_24h?.usd ?? 0,
     categories: geckoResult.categories,
     source: useBinance ? "binance" : "coingecko",

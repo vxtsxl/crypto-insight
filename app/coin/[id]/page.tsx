@@ -437,9 +437,9 @@ function normalizeData(data: CoinData, imageUrl: string): CoinData {
         price_change_percentage_24h: data.priceChange24h ?? 0,
         // 7d change and supply are not available from the unified API route.
         price_change_percentage_7d: 0,
-        high_24h: { usd: data.high24h ?? data.currentPrice },
-        low_24h: { usd: data.low24h ?? data.currentPrice },
-        ath: { usd: data.high24h ?? data.currentPrice },
+        high_24h: { usd: data.high24h || data.currentPrice },
+        low_24h: { usd: data.low24h || data.currentPrice },
+        ath: { usd: data.high24h || data.currentPrice },
         ath_change_percentage: { usd: null },
         circulating_supply: 0,
         total_supply: null,
