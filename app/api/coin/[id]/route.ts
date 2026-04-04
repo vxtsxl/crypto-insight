@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getRedisClient } from "@/lib/redis";
 
 const SYMBOL_MAP: Record<string, string> = {
   bitcoin: "BTCUSDT",
@@ -48,6 +49,8 @@ interface CoinData {
   low24h: number;
   categories: string[];
   source: "binance" | "coingecko";
+  cached: boolean;
+  cacheHit: boolean;
 }
 
 export async function GET(
@@ -58,6 +61,21 @@ export async function GET(
 
   if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
     return NextResponse.json({ error: "Invalid coin ID" }, { status: 404 });
+  }
+
+  const redis = getRedisClient();
+
+  // Check Redis cache before hitting external APIs
+  if (redis) {
+    try {
+      const cachedData = await redis.get(`coin:${id}`);
+      if (cachedData) {
+        const parsed = JSON.parse(cachedData);
+        return NextResponse.json({ ...parsed, cached: true, cacheHit: true });
+      }
+    } catch {
+      // Redis failure — fall through to normal fetch
+    }
   }
 
   const binanceSymbol = SYMBOL_MAP[id] ?? null;
@@ -123,7 +141,18 @@ export async function GET(
       : geckoResult.market_data?.low_24h?.usd ?? 0,
     categories: geckoResult.categories,
     source: useBinance ? "binance" : "coingecko",
+    cached: false,
+    cacheHit: false,
   };
+
+  // Cache the fresh response in Redis for 30 seconds
+  if (redis) {
+    try {
+      await redis.setex(`coin:${id}`, 30, JSON.stringify(data));
+    } catch {
+      // Caching failure — still return the data
+    }
+  }
 
   return NextResponse.json(data);
 }
