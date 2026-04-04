@@ -11,7 +11,8 @@ export function getRedisClient(): Redis | null {
 
   try {
     const client = new Redis(redisUrl, {
-      lazyConnect: false,
+      // Commands issued while Redis is disconnected fail immediately instead of
+      // being queued, so callers get a quick null-safe signal to skip caching.
       enableOfflineQueue: false,
     });
 
@@ -24,8 +25,10 @@ export function getRedisClient(): Redis | null {
     });
 
     client.on('error', (err: Error) => {
+      // Log the error but keep the client reference intact so that ioredis can
+      // attempt reconnection automatically. The singleton is not cleared here to
+      // prevent multiple client instances from being created on each call.
       console.error('[Redis] Connection error:', err.message);
-      redisClient = null;
     });
 
     redisClient = client;
