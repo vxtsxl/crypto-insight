@@ -14,6 +14,8 @@ interface CoinData {
     total_volume: { usd: number };
     price_change_percentage_24h: number;
     price_change_percentage_7d: number;
+    high_24h: { usd: number };
+    low_24h: { usd: number };
     ath: { usd: number };
     ath_change_percentage: { usd: number | null };
     circulating_supply: number;
@@ -434,8 +436,9 @@ function normalizeData(data: CoinData, imageUrl: string): CoinData {
         total_volume: { usd: data.volume24h ?? 0 },
         price_change_percentage_24h: data.priceChange24h ?? 0,
         // 7d change and supply are not available from the unified API route.
-        // ATH is approximated with the 24h high; ath_change_percentage is null (unavailable).
         price_change_percentage_7d: 0,
+        high_24h: { usd: data.high24h ?? data.currentPrice },
+        low_24h: { usd: data.low24h ?? data.currentPrice },
         ath: { usd: data.high24h ?? data.currentPrice },
         ath_change_percentage: { usd: null },
         circulating_supply: 0,
@@ -475,7 +478,9 @@ function fmt(n: number): string {
 
 function fmtPrice(n: number): string {
   if (n >= 1) return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  return `$${n.toFixed(6)}`;
+  if (n >= 0.01) return `$${n.toFixed(4)}`;
+  if (n >= 0.0001) return `$${n.toFixed(6)}`;
+  return `$${n.toFixed(8)}`;
 }
 
 function riskColors(level: RiskLevel) {
@@ -733,6 +738,8 @@ export default async function CoinPage({
   const change7d = coin.market_data.price_change_percentage_7d;
   const marketCap = coin.market_data.market_cap.usd;
   const volume = coin.market_data.total_volume.usd;
+  const high24h = coin.market_data.high_24h.usd;
+  const low24h = coin.market_data.low_24h.usd;
   const athChange = coin.market_data.ath_change_percentage.usd ?? null;
   const volumeRatio = marketCap > 0 ? (volume / marketCap) * 100 : 0;
 
@@ -893,6 +900,8 @@ export default async function CoinPage({
               { label: "Market Cap", value: fmt(marketCap) },
               { label: "24h Volume", value: fmt(volume) },
               { label: "Volume Ratio", value: `${volumeRatio.toFixed(1)}%` },
+              { label: "24H High", value: fmtPrice(high24h), color: "#4ade80" },
+              { label: "24H Low", value: fmtPrice(low24h), color: "#f87171" },
               {
                 label: "7d Change",
                 value: `${change7d >= 0 ? "+" : ""}${change7d?.toFixed(2)}%`,
