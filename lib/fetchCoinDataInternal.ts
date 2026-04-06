@@ -1,5 +1,34 @@
 import { getRedisClient } from "@/lib/redis";
 
+const FETCH_TIMEOUT_MS = 8000;
+const MAX_RETRIES = 2;
+const INITIAL_RETRY_DELAY_MS = 100;
+
+async function fetchWithRetry(
+  url: string,
+  attempt = 0
+): Promise<Response | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    return response;
+  } catch (err) {
+    clearTimeout(timer);
+    console.error(
+      `[fetchWithRetry] Attempt ${attempt + 1} failed for ${url}:`,
+      err
+    );
+    if (attempt < MAX_RETRIES) {
+      const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return fetchWithRetry(url, attempt + 1);
+    }
+    return null;
+  }
+}
+
 const SYMBOL_MAP: Record<string, string> = {
   bitcoin: "BTCUSDT",
   ethereum: "ETHUSDT",
@@ -80,18 +109,18 @@ export async function fetchCoinDataInternal(
   const binanceSymbol = SYMBOL_MAP[id] ?? null;
 
   const [geckoResult, binanceResult] = await Promise.all([
-    fetch(
+    fetchWithRetry(
       `https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&community_data=false&developer_data=false`
     )
-      .then((r) => (r.ok ? (r.json() as Promise<CoinGeckoResponse>) : null))
+      .then((r) => (r && r.ok ? (r.json() as Promise<CoinGeckoResponse>) : null))
       .catch(() => null),
 
     binanceSymbol
-      ? fetch(
+      ? fetchWithRetry(
           `https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`
         )
           .then((r) =>
-            r.ok ? (r.json() as Promise<BinanceTickerResponse>) : null
+            r && r.ok ? (r.json() as Promise<BinanceTickerResponse>) : null
           )
           .catch(() => null)
       : Promise.resolve(null),
