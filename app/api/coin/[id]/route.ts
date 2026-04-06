@@ -82,16 +82,14 @@ export async function GET(
 
   const [geckoResult, binanceResult] = await Promise.all([
     fetch(
-      `https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&community_data=false&developer_data=false`,
-      { next: { revalidate: 30 } }
+      `https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&community_data=false&developer_data=false`
     )
       .then((r) => (r.ok ? (r.json() as Promise<CoinGeckoResponse>) : null))
       .catch(() => null),
 
     binanceSymbol
       ? fetch(
-          `https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`,
-          { next: { revalidate: 30 } }
+          `https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`
         )
           .then((r) =>
             r.ok ? (r.json() as Promise<BinanceTickerResponse>) : null
