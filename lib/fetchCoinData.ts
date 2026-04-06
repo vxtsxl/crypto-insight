@@ -9,6 +9,8 @@ function getBaseUrl(): string {
     try {
       const parsed = new URL(envUrl);
       if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        // HTTP is intentionally allowed for Docker and local development
+        // where TLS termination is handled at the proxy/host level.
         return envUrl;
       }
     } catch {
@@ -19,6 +21,11 @@ function getBaseUrl(): string {
 }
 
 export async function fetchCoinData(id: string): Promise<CoinData | null> {
+  // Validate id before URL construction to prevent path traversal attacks
+  if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+    return null;
+  }
+
   const baseUrl = getBaseUrl();
 
   try {

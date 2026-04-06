@@ -55,7 +55,9 @@ export interface CoinData {
 export async function fetchCoinDataInternal(
   id: string
 ): Promise<CoinData | null> {
-  // Validate id to prevent cache key injection
+  // Validate id to prevent cache key injection.
+  // Hyphens and underscores are intentionally allowed — coin IDs such as
+  // "shiba-inu" are valid CoinGecko identifiers.
   if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
     return null;
   }
