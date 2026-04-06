@@ -3,6 +3,7 @@
 A comprehensive cryptocurrency analysis platform that provides real-time insights, market analysis, and investment recommendations.
 
 ## Features
+- ☸️ **Kubernetes Support** - (Coming Soon) Orchestration and scaling support
 
 - 🔍 **Real-time Coin Analysis** - Instant access to crypto market data from CoinGecko and Binance
 - 📊 **Risk Assessment** - Comprehensive risk scoring and volatility analysis
