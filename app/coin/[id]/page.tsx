@@ -1,6 +1,7 @@
 import Link from "next/link";
 import HypeScore from "@/components/HypeScore/HypeScore";
 import { getHypeScore } from "@/lib/hypeScoreCalculator";
+import { fetchCoinData, CoinData as FetchedCoinData } from "@/lib/fetchCoinData";
 
 interface CoinData {
   id: string;
@@ -22,14 +23,7 @@ interface CoinData {
     total_supply: number | null;
   };
   description: { en: string };
-  // Optional fields from unified API route response
   source?: "binance" | "coingecko";
-  currentPrice?: number;
-  priceChange24h?: number;
-  marketCap?: number | null;
-  volume24h?: number;
-  high24h?: number;
-  low24h?: number;
 }
 
 // ─── Risk Score ────────────────────────────────────────────────────────────
@@ -405,53 +399,38 @@ function getPriceZones(price: number): PriceZones {
 }
 
 // ─── Data Fetching ─────────────────────────────────────────────────────────
-function getBaseUrl(): string {
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3000";
-}
-
-async function getCoinData(id: string): Promise<CoinData | null> {
+async function getCoinData(id: string): Promise<FetchedCoinData | null> {
   try {
-    const res = await fetch(`${getBaseUrl()}/api/coin/${id}`, {
-      next: { revalidate: 30 },
-    });
-    if (!res.ok) return null;
-    return res.json();
+    return await fetchCoinData(id);
   } catch {
     return null;
   }
 }
 
-function normalizeData(data: CoinData, imageUrl: string): CoinData {
-  // If it has currentPrice field, it came from the unified API route
-  if (data.currentPrice !== undefined) {
-    return {
-      id: data.id,
-      name: data.name,
-      symbol: data.symbol,
-      image: { large: imageUrl },
-      market_data: {
-        current_price: { usd: data.currentPrice },
-        market_cap: { usd: data.marketCap ?? 0 },
-        total_volume: { usd: data.volume24h ?? 0 },
-        price_change_percentage_24h: data.priceChange24h ?? 0,
-        // 7d change and supply are not available from the unified API route.
-        price_change_percentage_7d: 0,
-        high_24h: { usd: data.high24h || data.currentPrice },
-        low_24h: { usd: data.low24h || data.currentPrice },
-        ath: { usd: data.high24h || data.currentPrice },
-        ath_change_percentage: { usd: null },
-        circulating_supply: 0,
-        total_supply: null,
-      },
-      categories: data.categories ?? [],
-      description: { en: "" },
-      source: data.source,
-    };
-  }
-
-  // Otherwise it's already in CoinGecko / internal format — return as-is
-  return data;
+function normalizeData(data: FetchedCoinData, imageUrl: string): CoinData {
+  return {
+    id: data.id,
+    name: data.name,
+    symbol: data.symbol,
+    image: { large: imageUrl },
+    market_data: {
+      current_price: { usd: data.currentPrice },
+      market_cap: { usd: data.marketCap ?? 0 },
+      total_volume: { usd: data.volume24h ?? 0 },
+      price_change_percentage_24h: data.priceChange24h ?? 0,
+      // 7d change and supply are not available from the shared fetch utility.
+      price_change_percentage_7d: 0,
+      high_24h: { usd: data.high24h || data.currentPrice },
+      low_24h: { usd: data.low24h || data.currentPrice },
+      ath: { usd: data.high24h || data.currentPrice },
+      ath_change_percentage: { usd: null },
+      circulating_supply: 0,
+      total_supply: null,
+    },
+    categories: data.categories ?? [],
+    description: { en: "" },
+    source: data.source,
+  };
 }
 
 async function getCoinImage(coinId: string): Promise<string> {
@@ -727,10 +706,8 @@ export default async function CoinPage({
     );
   }
 
-  // Fetch coin image if not already in data, then normalize to internal format
-  const imageUrl = rawData.image?.large
-    ? rawData.image.large
-    : await getCoinImage(id);
+  // Fetch coin image, then normalize to internal format
+  const imageUrl = await getCoinImage(id);
   const coin = normalizeData(rawData, imageUrl);
 
   const price = coin.market_data.current_price.usd;
