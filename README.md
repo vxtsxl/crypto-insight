@@ -1,36 +1,105 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Crypto Insight - Smart Crypto Analysis Tool
 
-## Getting Started
+A comprehensive cryptocurrency analysis platform that provides real-time insights, market analysis, and investment recommendations.
 
-First, run the development server:
+## Features
 
-```bash
+- 🔍 **Real-time Coin Analysis** - Instant access to crypto market data from CoinGecko and Binance
+- 📊 **Risk Assessment** - Comprehensive risk scoring and volatility analysis
+- 💡 **Smart Verdicts** - AI-powered investment recommendations (Avoid/Hold/Buy)
+- 🎯 **Hype Score** - Market sentiment and volatility indicators
+- 📈 **Market Statistics** - 24h volume, price changes, and trend analysis
+- 💰 **Price Zones** - Buy/Sell/Avoid price levels with technical analysis
+- 🚀 **Trending Coins** - Real-time trending cryptocurrencies
+- 🎲 **Top Opportunities** - Daily investment opportunities
+
+## Tech Stack
+
+- **Frontend:** Next.js 16, React, TypeScript
+- **Backend:** Next.js API Routes
+- **Caching:** Redis
+- **Data Sources:** CoinGecko API, Binance API
+- **Containerization:** Docker & Docker Compose
+
+## Quick Start
+
+### Local Development
+bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+# Open http://localhost:3000
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Docker
+bash
+docker-compose up --build
+# Open http://localhost:3000
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-## Learn More
+## Environment Variables
 
-To learn more about Next.js, take a look at the following resources:
+Create a .env.local file:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
+REDIS_URL=redis://localhost:6379
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## Deploy on Vercel
+## Architecture
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Coin Data Fetching
+- Robust retry logic with exponential backoff
+- CoinGecko as primary data source
+- Binance fallback for 40+ coins when CoinGecko is rate limited
+- Redis caching (5 minutes TTL) to reduce API pressure
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Rate Limiting Handling
+- 4 automatic retries with 100ms-800ms delays
+- User-Agent headers for API compatibility
+- Binance fallback for coins in SYMBOL_MAP
+- Comprehensive error logging
+
+## Supported Coins
+
+40+ coins including: Bitcoin, Ethereum, Solana, Dogecoin, Shiba Inu, Pepe, Ripple, Cardano, Polkadot, and more!
+
+## API Endpoints
+
+- GET /api/coin/:id\` - Get detailed coin analysis
+- GET /api/coins/trending\` - Get trending coins
+- GET /api/coins/opportunities\` - Get top opportunities
+
+## Performance
+
+- Response time: <1 second (cached)
+- Redis caching: 5 minutes
+- Automatic retry on failures
+- Rate limit handling: ✅
+
+## Deployment
+
+### Docker Hub
+bash
+docker pull iivatsal/crypto-insight:latest
+docker run -p 3000:3000 iivatsal/crypto-insight:latest
+
+
+### Requirements
+- Node.js 20+
+- Redis 7+
+- Docker & Docker Compose
+
+## Contributing
+
+Contributions are welcome! Feel free to open issues and pull requests.
+
+## License
+
+MIT License
+
+## Support
+
+For issues and questions, please open an issue on GitHub.
+
+---
+
+**Made with ❤️ by vxtsxl**
