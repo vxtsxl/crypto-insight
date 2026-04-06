@@ -55,6 +55,11 @@ export interface CoinData {
 export async function fetchCoinDataInternal(
   id: string
 ): Promise<CoinData | null> {
+  // Validate id to prevent cache key injection
+  if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+    return null;
+  }
+
   const redis = getRedisClient();
 
   // Check Redis cache before hitting external APIs

@@ -4,7 +4,18 @@ export type { CoinData };
 
 function getBaseUrl(): string {
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
+  const envUrl = process.env.NEXT_PUBLIC_BASE_URL;
+  if (envUrl) {
+    try {
+      const parsed = new URL(envUrl);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        return envUrl;
+      }
+    } catch {
+      // Invalid URL — fall through to default
+    }
+  }
+  return "http://localhost:3000";
 }
 
 export async function fetchCoinData(id: string): Promise<CoinData | null> {
