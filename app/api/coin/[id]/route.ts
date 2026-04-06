@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchCoinData } from "@/lib/fetchCoinData";
+import { fetchCoinDataInternal } from "@/lib/fetchCoinDataInternal";
 
 export async function GET(
   _request: Request,
@@ -11,7 +11,7 @@ export async function GET(
     return NextResponse.json({ error: "Invalid coin ID" }, { status: 404 });
   }
 
-  const data = await fetchCoinData(id);
+  const data = await fetchCoinDataInternal(id);
 
   if (!data) {
     return NextResponse.json({ error: "Coin not found" }, { status: 404 });
