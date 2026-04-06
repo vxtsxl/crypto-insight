@@ -157,8 +157,9 @@ const SYMBOL_MAP: Record<string, string> = {
   truefi: "TRUUSDT",
   "pudgy-penguins": "PUDGYUSDT",
   bittensor: "TAOUSDT",
-  "artificial-superintelligence-alliance": "FETUSDT",
+  // Fetch.ai rebranded as ASI Alliance; both CoinGecko IDs remain active
   "fetch-ai": "FETUSDT",
+  "artificial-superintelligence-alliance": "FETUSDT",
   "worldcoin-wld": "WLDUSDT",
   "hyperliquid": "HYPEUSDT",
 
