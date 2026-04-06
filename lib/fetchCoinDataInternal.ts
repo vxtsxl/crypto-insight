@@ -3,11 +3,17 @@ import { getRedisClient } from "@/lib/redis";
 const FETCH_TIMEOUT_MS = 15000;
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 100;
+const CACHE_TTL_SECONDS = 300; // 5 minutes
 
 const COINGECKO_HEADERS = {
   "User-Agent": "crypto-insight/1.0 (https://github.com/vxtsxl/crypto-insight)",
   Accept: "application/json",
 };
+
+function jitter(base: number): number {
+  // Add up to 50% random jitter to prevent thundering herd
+  return base + Math.floor(Math.random() * base * 0.5);
+}
 
 async function fetchWithRetry(
   url: string,
@@ -19,6 +25,20 @@ async function fetchWithRetry(
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(timer);
+
+    // Retry on 429 (Too Many Requests) with exponential backoff + jitter
+    if (response.status === 429 && attempt < MAX_RETRIES) {
+      // Drain the response body to allow connection reuse
+      await response.text().catch(() => {});
+      const baseDelay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+      const delay = jitter(baseDelay);
+      console.warn(
+        `[fetchWithRetry] 429 rate-limited on attempt ${attempt + 1}/${MAX_RETRIES + 1} for ${url} — retrying in ${delay}ms`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return fetchWithRetry(url, options, attempt + 1);
+    }
+
     return response;
   } catch (err) {
     clearTimeout(timer);
@@ -27,7 +47,8 @@ async function fetchWithRetry(
       err
     );
     if (attempt < MAX_RETRIES) {
-      const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+      const baseDelay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+      const delay = jitter(baseDelay);
       console.log(`[fetchWithRetry] Retrying in ${delay}ms (attempt ${attempt + 2}/${MAX_RETRIES + 1})...`);
       await new Promise((resolve) => setTimeout(resolve, delay));
       return fetchWithRetry(url, options, attempt + 1);
@@ -36,6 +57,19 @@ async function fetchWithRetry(
     return null;
   }
 }
+
+const safeParse = (val: string, fallback: number): number => {
+  const n = parseFloat(val);
+  return isNaN(n) ? fallback : n;
+};
+
+// For price fields, treat 0 as invalid and fall back to the alternative source.
+// Binance can return "0.00000000" during brief data gaps; CoinGecko is a better
+// fallback than silently returning $0 to the UI.
+const safePositiveNum = (val: string, fallback: number): number => {
+  const n = parseFloat(val);
+  return isNaN(n) || n <= 0 ? fallback : n;
+};
 
 const SYMBOL_MAP: Record<string, string> = {
   bitcoin: "BTCUSDT",
@@ -180,27 +214,56 @@ export async function fetchCoinDataInternal(
       : Promise.resolve(null),
   ]);
 
+  // If CoinGecko failed but we have Binance data, build a partial response from Binance
   if (!geckoResult) {
-    console.error(`[fetchCoinDataInternal] No CoinGecko data for "${id}" — returning null`);
+    if (binanceResult && binanceSymbol) {
+      console.warn(
+        `[fetchCoinDataInternal] CoinGecko unavailable for "${id}" — using Binance fallback`
+      );
+
+      // Derive a readable symbol from the Binance pair (e.g. "BTCUSDT" → "btc").
+      // All entries in SYMBOL_MAP use USDT as the quote currency.
+      const derivedSymbol = binanceSymbol.replace(/USDT$/, "").toLowerCase();
+
+      const fallbackData: CoinData = {
+        id,
+        name: id
+          .split("-")
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(" "),
+        symbol: derivedSymbol,
+        currentPrice: safePositiveNum(binanceResult.lastPrice, 0),
+        // Binance priceChangePercent is a percentage value, matching CoinGecko's price_change_percentage_24h
+        priceChange24h: safeParse(binanceResult.priceChangePercent, 0),
+        marketCap: null,
+        volume24h: safeParse(binanceResult.quoteVolume, 0),
+        high24h: safePositiveNum(binanceResult.highPrice, 0),
+        low24h: safePositiveNum(binanceResult.lowPrice, 0),
+        categories: [],
+        source: "binance",
+        cached: false,
+        cacheHit: false,
+      };
+
+      if (redis) {
+        try {
+          await redis.setex(`coin:${id}`, CACHE_TTL_SECONDS, JSON.stringify(fallbackData));
+          console.log(`[fetchCoinDataInternal] Cached Binance fallback "${id}" in Redis for ${CACHE_TTL_SECONDS}s`);
+        } catch {
+          console.warn(`[fetchCoinDataInternal] Redis write failed for "${id}" (Binance fallback)`);
+        }
+      }
+
+      return fallbackData;
+    }
+
+    console.error(`[fetchCoinDataInternal] No data available for "${id}" — returning null`);
     return null;
   }
 
   console.log(`[fetchCoinDataInternal] Data assembled for "${id}" (source: ${binanceResult ? "binance+coingecko" : "coingecko"})`);
 
   const useBinance = binanceResult !== null;
-
-  const safeParse = (val: string, fallback: number): number => {
-    const n = parseFloat(val);
-    return isNaN(n) ? fallback : n;
-  };
-
-  // For price fields, treat 0 as invalid and fall back to the alternative source.
-  // Binance can return "0.00000000" during brief data gaps; CoinGecko is a better
-  // fallback than silently returning $0 to the UI.
-  const safePositiveNum = (val: string, fallback: number): number => {
-    const n = parseFloat(val);
-    return isNaN(n) || n <= 0 ? fallback : n;
-  };
 
   const gmd = geckoResult.market_data;
   const gPrice = gmd?.current_price?.usd ?? 0;
@@ -236,11 +299,11 @@ export async function fetchCoinDataInternal(
     cacheHit: false,
   };
 
-  // Cache the fresh response in Redis for 30 seconds
+  // Cache the fresh response in Redis for 5 minutes
   if (redis) {
     try {
-      await redis.setex(`coin:${id}`, 30, JSON.stringify(data));
-      console.log(`[fetchCoinDataInternal] Cached "${id}" in Redis for 30s`);
+      await redis.setex(`coin:${id}`, CACHE_TTL_SECONDS, JSON.stringify(data));
+      console.log(`[fetchCoinDataInternal] Cached "${id}" in Redis for ${CACHE_TTL_SECONDS}s`);
     } catch {
       // Caching failure — still return the data
       console.warn(`[fetchCoinDataInternal] Redis write failed for "${id}" — data returned without caching`);
