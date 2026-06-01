@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crypto-insight-config
+  namespace: crypto-insight
+data:
+  NODE_ENV: "production"
+  REDIS_URL: "redis://redis-service:6379"
+  NEXT_PUBLIC_BASE_URL: "http://crypto-insight-service:3000"
