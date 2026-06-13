@@ -1,3 +1,4 @@
+import { coinGeckoApiDuration, redisCacheHits, redisCacheMisses } from '@/lib/metrics';
 import { getRedisClient } from "@/lib/redis";
 
 const FETCH_TIMEOUT_MS = 15000;
@@ -11,7 +12,6 @@ const COINGECKO_HEADERS = {
 };
 
 function jitter(base: number): number {
-  // Add up to 50% random jitter to prevent thundering herd
   return base + Math.floor(Math.random() * base * 0.5);
 }
 
@@ -26,9 +26,7 @@ async function fetchWithRetry(
     const response = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(timer);
 
-    // Retry on 429 (Too Many Requests) with exponential backoff + jitter
     if (response.status === 429 && attempt < MAX_RETRIES) {
-      // Drain the response body to allow connection reuse
       await response.text().catch(() => {});
       const baseDelay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
       const delay = jitter(baseDelay);
@@ -63,9 +61,6 @@ const safeParse = (val: string, fallback: number): number => {
   return isNaN(n) ? fallback : n;
 };
 
-// For price fields, treat 0 as invalid and fall back to the alternative source.
-// Binance can return "0.00000000" during brief data gaps; CoinGecko is a better
-// fallback than silently returning $0 to the UI.
 const safePositiveNum = (val: string, fallback: number): number => {
   const n = parseFloat(val);
   return isNaN(n) || n <= 0 ? fallback : n;
@@ -118,50 +113,49 @@ const SYMBOL_MAP: Record<string, string> = {
   thorchain: "RUNEUSDT",
   "injective-protocol": "INJUSDT",
   "sei-network": "SEIUSDT",
-  "celestia": "TIAUSDT",
+  celestia: "TIAUSDT",
   "dydx-chain": "DYDXUSDT",
   "jupiter-exchange-solana": "JUPUSDT",
   "pyth-network": "PYTHUSDT",
   "jito-governance-token": "JITOUSDT",
   "render-token": "RENDERUSDT",
-  "stacks": "STXUSDT",
-  "chiliz": "CHZUSDT",
-  "flow": "FLOWUSDT",
+  stacks: "STXUSDT",
+  chiliz: "CHZUSDT",
+  flow: "FLOWUSDT",
   "axie-infinity": "AXSUSDT",
-  "illuvium": "ILVUSDT",
+  illuvium: "ILVUSDT",
   "immutable-x": "IMXUSDT",
-  "stepn": "GMTUSDT",
-  "apecoin": "APEUSDT",
-  "gala": "GALAUSDT",
-  "enjincoin": "ENJUSDT",
+  stepn: "GMTUSDT",
+  apecoin: "APEUSDT",
+  gala: "GALAUSDT",
+  enjincoin: "ENJUSDT",
   "theta-token": "THETAUSDT",
   "compound-governance-token": "COMPUSDT",
   "yearn-finance": "YFIUSDT",
-  "blur": "BLURUSDT",
-  "wormhole": "WUSDT",
-  "helium": "HNTUSDT",
-  "harmony": "ONEUSDT",
-  "ontology": "ONTUSDT",
+  blur: "BLURUSDT",
+  wormhole: "WUSDT",
+  helium: "HNTUSDT",
+  harmony: "ONEUSDT",
+  ontology: "ONTUSDT",
 
   // Meme coins
   pepe: "PEPEUSDT",
   "shiba-inu": "SHIBUSDT",
   dogecoin: "DOGEUSDT",
   floki: "FLOKIUSDT",
-  "dogwifcoin": "WIFUSDT",
+  dogwifcoin: "WIFUSDT",
   bonk: "BONKUSDT",
   notcoin: "NOTUSDT",
   "book-of-meme": "BOMUSDT",
 
-  // Trending / homepage coins (problem statement)
+  // Trending / homepage coins
   truefi: "TRUUSDT",
   "pudgy-penguins": "PUDGYUSDT",
   bittensor: "TAOUSDT",
-  // Fetch.ai rebranded as ASI Alliance; both CoinGecko IDs remain active
   "fetch-ai": "FETUSDT",
   "artificial-superintelligence-alliance": "FETUSDT",
   "worldcoin-wld": "WLDUSDT",
-  "hyperliquid": "HYPEUSDT",
+  hyperliquid: "HYPEUSDT",
 
   // Wrapped / liquid staking
   "wrapped-bitcoin": "WBTCUSDT",
@@ -169,7 +163,7 @@ const SYMBOL_MAP: Record<string, string> = {
   // Metaverse / Gaming
   "the-sandbox": "SANDUSDT",
   decentraland: "MANAUSDT",
-  "magic": "MAGICUSDT",
+  magic: "MAGICUSDT",
 };
 
 interface CoinGeckoResponse {
@@ -214,9 +208,6 @@ export interface CoinData {
 export async function fetchCoinDataInternal(
   id: string
 ): Promise<CoinData | null> {
-  // Validate id to prevent cache key injection.
-  // Hyphens and underscores are intentionally allowed — coin IDs such as
-  // "shiba-inu" are valid CoinGecko identifiers.
   if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
     return null;
   }
@@ -229,11 +220,13 @@ export async function fetchCoinDataInternal(
       const cachedData = await redis.get(`coin:${id}`);
       if (cachedData) {
         console.log(`[fetchCoinDataInternal] Cache hit for "${id}"`);
+        redisCacheHits.inc({ key_type: 'coin' });
         const parsed = JSON.parse(cachedData);
         return { ...parsed, cached: true, cacheHit: true };
+      } else {
+        redisCacheMisses.inc({ key_type: 'coin' });
       }
     } catch {
-      // Redis failure — fall through to normal fetch
       console.warn(`[fetchCoinDataInternal] Redis read failed for "${id}" — proceeding without cache`);
     }
   }
@@ -244,24 +237,32 @@ export async function fetchCoinDataInternal(
   const geckoUrl = `https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&community_data=false&developer_data=false`;
 
   const [geckoResult, binanceResult] = await Promise.all([
-    fetchWithRetry(geckoUrl, { headers: COINGECKO_HEADERS })
-      .then((r) => {
+    // CoinGecko fetch with metrics timing
+    (async () => {
+      const endTimer = coinGeckoApiDuration.startTimer({ endpoint: 'coins_id', status: 'success' });
+      try {
+        const r = await fetchWithRetry(geckoUrl, { headers: COINGECKO_HEADERS });
         if (!r) {
+          endTimer({ status: 'null' });
           console.error(`[fetchCoinDataInternal] CoinGecko fetch returned null for "${id}"`);
           return null;
         }
         if (!r.ok) {
+          endTimer({ status: String(r.status) });
           console.error(`[fetchCoinDataInternal] CoinGecko responded ${r.status} for "${id}"`);
           return null;
         }
+        endTimer({ status: '200' });
         console.log(`[fetchCoinDataInternal] CoinGecko OK for "${id}"`);
         return r.json() as Promise<CoinGeckoResponse>;
-      })
-      .catch((err) => {
+      } catch (err) {
+        endTimer({ status: 'error' });
         console.error(`[fetchCoinDataInternal] CoinGecko error for "${id}":`, err);
         return null;
-      }),
+      }
+    })(),
 
+    // Binance fetch (unchanged)
     binanceSymbol
       ? fetchWithRetry(
           `https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`
@@ -284,8 +285,6 @@ export async function fetchCoinDataInternal(
         `[fetchCoinDataInternal] CoinGecko unavailable for "${id}" — using Binance fallback`
       );
 
-      // Derive a readable symbol from the Binance pair (e.g. "BTCUSDT" → "btc").
-      // All entries in SYMBOL_MAP use USDT as the quote currency.
       const derivedSymbol = binanceSymbol.replace(/USDT$/, "").toLowerCase();
 
       const fallbackData: CoinData = {
@@ -296,7 +295,6 @@ export async function fetchCoinDataInternal(
           .join(" "),
         symbol: derivedSymbol,
         currentPrice: safePositiveNum(binanceResult.lastPrice, 0),
-        // Binance priceChangePercent is a percentage value, matching CoinGecko's price_change_percentage_24h
         priceChange24h: safeParse(binanceResult.priceChangePercent, 0),
         marketCap: null,
         volume24h: safeParse(binanceResult.quoteVolume, 0),
@@ -368,7 +366,6 @@ export async function fetchCoinDataInternal(
       await redis.setex(`coin:${id}`, CACHE_TTL_SECONDS, JSON.stringify(data));
       console.log(`[fetchCoinDataInternal] Cached "${id}" in Redis for ${CACHE_TTL_SECONDS}s`);
     } catch {
-      // Caching failure — still return the data
       console.warn(`[fetchCoinDataInternal] Redis write failed for "${id}" — data returned without caching`);
     }
   }

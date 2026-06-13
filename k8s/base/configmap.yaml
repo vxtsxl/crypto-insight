@@ -7,3 +7,5 @@ data:
   NODE_ENV: "production"
   REDIS_URL: "redis://redis-service:6379"
   NEXT_PUBLIC_BASE_URL: "http://crypto-insight-service:3000"
+  HOSTNAME: "0.0.0.0"
+  PORT: "3000"
