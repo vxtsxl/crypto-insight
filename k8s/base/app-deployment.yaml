@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: crypto-insight
-          image: iivatsal/crypto-insight:latest
+          image: us-central1-docker.pkg.dev/crypto-insight-k8s/crypto-insight/crypto-insight:latest
           ports:
             - containerPort: 3000
           envFrom:
