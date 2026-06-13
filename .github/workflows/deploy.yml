@@ -54,7 +54,7 @@ jobs:
 
       - name: Update image tag in deployment YAML
         run: |
-          sed -i "s|image:.*crypto-insight.*|          image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE }}:${{ github.sha }}|g" k8s/base/app-deployment.yaml
+          sed -i "s|image: us-central1-docker.pkg.dev/.*/crypto-insight:.*|image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE }}:${{ github.sha }}|g" k8s/base/app-deployment.yaml
           echo "Updated image tag to ${{ github.sha }}"
           grep "image:" k8s/base/app-deployment.yaml
 
