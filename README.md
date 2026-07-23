@@ -2,7 +2,7 @@
 
 A real-time cryptocurrency analysis platform deployed on **Google Kubernetes Engine** with a full production-grade observability and GitOps stack.
 
-**Live:** `http://35.232.228.247( Disabled right now to sve up GKE costs)
+**Live:** `http://35.232.228.247( Disabled right now to save up GKE costs)
 
 ---
 
